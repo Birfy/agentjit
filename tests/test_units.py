@@ -102,11 +102,17 @@ def test_sandbox_kills_infinite_loop(sb):
     assert r.killed == "timeout" and r.why_dead == "执行超时"
 
 
-def test_sandbox_kills_memory_bomb(sb):
-    # Darwin 忽略 RLIMIT_AS，所以这条实际测的是父进程看门狗
+def test_sandbox_contains_memory_bomb(sb):
+    """两条路都算兜住，测的是"兜住了"而不是"谁兜住的"。
+
+    Linux 上 RLIMIT_AS 生效，子进程自己抛 MemoryError，那一次调用失败但进程还在；
+    Darwin 忽略 RLIMIT_AS，只能靠父进程的看门狗轮询 RSS 再 kill。
+    钉死其中一条，另一个平台上就会红。
+    """
     r = sb.run("def solve(params, ctx):\n    return {'n': len([0] * 200000000)}\n",
                "solve", [{}], mem_mb=256, timeout_ms=15000)
-    assert r.killed == "memory"
+    caught_by_rlimit = bool(r.results) and "MemoryError" in r.results[0].error
+    assert r.killed == "memory" or caught_by_rlimit, r
 
 
 def test_sandbox_swallows_stdout_from_generated_code(sb):

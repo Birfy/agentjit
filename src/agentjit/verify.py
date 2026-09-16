@@ -144,6 +144,14 @@ def verify(
           f"{len(visible) - len(bad_v)}/{len(visible)} 通过" if bad_v else f"{len(visible)}/{len(visible)} 通过",
           {"failures": bad_v})
 
+    # 可见用例没过的时候，保留集的结论没有信息量：它要回答的是"可见用例过了但
+    # 保留集没过吗"，前提不成立就不该记一笔。不止损的话，一份对所有输入都崩溃的
+    # 代码会同时挂掉两道关，归因变成平台相关的
+    #（Linux 的 RLIMIT_AS 让子进程逐次抛 MemoryError，macOS 那边整个进程被看门狗杀掉，
+    # 后者走 why_dead 提前返回，只留下一道关卡）。
+    if (bail := _bail(c, t0)):
+        return bail
+
     if held:
         bad_h = _check_examples(run, held, len(visible))
         c.add("examples.holdout", not bad_h,
