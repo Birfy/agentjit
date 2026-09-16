@@ -71,8 +71,8 @@ first call    synthesise + verify   about a minute, a few thousand tokens
 every call    sandboxed execution   ~30ms,          zero tokens
 ```
 
-(Measured across the twelve compiles in the audit below: 56s to 195s each, every one
-through the local `claude` CLI, which carries its own overhead.)
+(Measured across the compiles in the audit below: 56s to 195s each, every one through the
+local `claude` CLI, which carries its own overhead.)
 
 ---
 
@@ -273,6 +273,11 @@ model's non-determinism shows up:
 | passed on the first attempt, no repair round needed | **12 / 12** |
 | agreeing with the reference on every random input | **2400 / 2400** |
 
+That is the run in `tools/audit_e2e_result.json`. Two further runs of the same audit — one
+before it, one after, on the prompt exactly as it ships — came back the same, so the
+figure across everything measured is **24 compiles and 4800 random inputs with no
+disagreement and no repair round used**.
+
 Both directions have to be visible: **passing its own cases but failing here** means the
 generated cases were too weak and missed a real bug; **failing its own cases but passing
 here** means a generated case had a wrong expectation and condemned correct code. Neither
@@ -469,10 +474,10 @@ was about.
 
 - **One model, three attempts maximum.** Every number here rests on Claude Haiku 4.5. What
   happens with a different model, a different temperature, or more rounds is unknown.
-- **The repair loop is currently untested by the audit.** Eighteen compiles in a row passed
-  on the first attempt, so nothing exercised it. `tests/test_synth.py` covers it with a
-  scripted client, but no *real* model has failed and recovered since the `strptime` fix.
-  That is a good problem, and it does mean `max_attempts = 3` is a number nothing has
+- **The repair loop is currently untested by the audit.** Twenty-four compiles in a row
+  passed on the first attempt, so nothing exercised it. `tests/test_synth.py` covers it
+  with a scripted client, but no *real* model has failed and recovered since the `strptime`
+  fix. That is a good problem, and it does mean `max_attempts = 3` is a number nothing has
   pushed against.
 - **Vague requirements have only a qualitative result.** After the `assumes` change the
   model does declare its assumptions, but how *accurate* those declarations are, and how

@@ -18,7 +18,8 @@ What has been measured (`tools/audit_tests.py`, `tools/audit_traps.py`,
 
 - 6 requirements × 8 generated cases, expectations **48/48 in agreement** with the
   reference, and **18/18 of the planted traps** exercised by at least one case
-- 6 requirements compiled, the result agreeing with the reference on **every random input**
+- **24 compiles across three runs**, every one passing on the first attempt, and every one
+  agreeing with the reference on all 200 random inputs — 4800 in total, zero disagreements
 
 Those numbers look good, but **the audit's oracle and the requirements come from the same
 person**. Someone writing a requirement while knowing what they intend to test writes more
@@ -65,7 +66,7 @@ Not many left; after the cull there are four:
 | Parameter | Current | The question |
 | --- | --- | --- |
 | `gen_tests` | 8 | how many cases to write. More costs tokens and raises the chance of a wrong one; fewer leaves the criteria thin |
-| `max_attempts` | 3 | across 15 rounds only one requirement ever reached attempt 2 or 3 — and the root cause was a sandbox limitation, since fixed. A case that genuinely needs several rounds has not been seen |
+| `max_attempts` | 3 | **24 consecutive compiles passed on the first attempt.** The only requirement that ever needed a second was `workdays`, and the root cause turned out to be a sandbox limitation, since fixed. Nothing has pushed against this number, and nothing has exercised the repair loop with a real model since |
 | `lookup.MIN_SIMILARITY` | 0.20 | **script-dependent, so it cannot separate anything on its own.** Chinese: unrelated ~0.03, genuine rewrites 0.29-0.41. English: unrelated 0.21-0.28 (the bigram floor alone), rewrites 0.51-0.54. Either normalise against a per-language baseline, or accept it as a pure cost knob and say so |
 | `llm.CLI_OVERHEAD_TOKENS` | 22200 | the fixed overhead `claude -p` carries on every call, measured against an empty task. It moves with the CLI version |
 
