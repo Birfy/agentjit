@@ -24,6 +24,18 @@ class Example:
     output: Any
     note: str = ""
     boundary: bool = False       # 是否边界用例；VERIFIED 要求至少一个
+    # 这条判据是谁给的。测试集只增不减（correctness.md §10），一年后回头看
+    # "这个期望值凭什么是它"，唯一能回答的就是出处。
+    origin: str = "caller"       # caller | adjudication | property | incident | manual
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"input": self.input, "output": self.output, "note": self.note,
+                "boundary": self.boundary, "origin": self.origin}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Example":
+        return cls(input=d["input"], output=d["output"], note=d.get("note", ""),
+                   boundary=d.get("boundary", False), origin=d.get("origin", "caller"))
 
 
 @dataclass
@@ -36,6 +48,15 @@ class Spec:
     entry: str = "solve"
     timeout_ms: int = 5000
     mem_mb: int = 512
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"intent": self.intent, "param_schema": self.param_schema,
+                "return_schema": self.return_schema, "entry": self.entry,
+                "timeout_ms": self.timeout_ms, "mem_mb": self.mem_mb}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Spec":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
 @dataclass
@@ -53,6 +74,15 @@ class GateResult:
         if self.passed:
             return "PASS"
         return "FAIL" if self.blocking else "WARN"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "passed": self.passed, "summary": self.summary,
+                "detail": self.detail, "blocking": self.blocking}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "GateResult":
+        return cls(name=d["name"], passed=d["passed"], summary=d["summary"],
+                   detail=d.get("detail") or {}, blocking=d.get("blocking", True))
 
 
 @dataclass
@@ -76,6 +106,15 @@ class Report:
         lines.append("")
         lines.append(f"级别: {self.level.value}   耗时: {self.wall_ms:.0f}ms")
         return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"level": self.level.value, "wall_ms": self.wall_ms,
+                "gates": [g.to_dict() for g in self.gates]}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Report":
+        return cls(level=Level(d["level"]), wall_ms=d.get("wall_ms", 0.0),
+                   gates=[GateResult.from_dict(g) for g in d.get("gates", [])])
 
 
 def deep_equal(a: Any, b: Any, rel_tol: float = 1e-9, abs_tol: float = 1e-12) -> bool:

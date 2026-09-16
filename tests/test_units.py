@@ -146,3 +146,60 @@ def test_verify_short_circuits_on_static_failure():
                [Example(input={}, output={})])
     assert r.level.value == "REJECTED"
     assert [g.name for g in r.gates] == ["static"]      # 没进沙箱
+
+
+# --- 后置断言 --------------------------------------------------------------
+def test_properties_are_mined_only_when_they_actually_hold():
+    from agentjit import assertions
+
+    ranked = [Example({"records": [{"n": "a"}, {"n": "b"}]}, [{"rank": 1}, {"rank": 2}]),
+              Example({"records": []}, [], boundary=True),
+              Example({"records": [{"n": "s"}]}, [{"rank": 1}])]
+    assert "size_preserved" in assertions.mine(ranked)
+
+    # 分组聚合会把 N 行压成 M 组，长度守恒对它根本不成立
+    grouped = [Example({"rows": [{"t": "a"}, {"t": "a"}]}, {"a": 2.0}),
+               Example({"rows": [{"t": "b"}]}, {"b": 1.0})]
+    got = assertions.mine(grouped)
+    assert "size_preserved" not in got and "keys_from_input" in got
+
+
+def test_a_property_holding_on_one_example_is_a_coincidence():
+    from agentjit import assertions
+    assert assertions.mine([Example({"rows": [1]}, [2])]) == []
+
+
+def test_unknown_property_names_are_ignored_not_fatal():
+    """性质库改过之后，registry 里的老函数还带着旧名字。"""
+    from agentjit import assertions
+    assert assertions.check(["没有这条"], {"rows": []}, []) == []
+
+
+# --- 成本模型 --------------------------------------------------------------
+def test_saving_comes_from_not_having_to_think_it_through_again():
+    """参数和结果两条路都要付，抵消掉。真正省下的是重新想一遍的成本。"""
+    from agentjit.econ import CostModel
+
+    c = CostModel(reasoning_tokens=600)
+    zero = CostModel(reasoning_tokens=0, call_overhead_tokens=0)
+    args, result = {"rows": [1, 2, 3]}, {"n": 3}
+
+    assert c.saving("需求", args, result) > 0
+    # 推理开销归零之后，剩下的只是搬运，省不出什么
+    assert abs(zero.saving("需求", args, result)) < 200
+
+
+def test_output_tokens_are_weighted_because_they_cost_more():
+    from agentjit.econ import CostModel
+    assert CostModel(out_weight=1.0).saving("需求", {"a": 1}, {"b": 2}) \
+        < CostModel(out_weight=5.0).saving("需求", {"a": 1}, {"b": 2})
+
+
+def test_a_huge_argument_can_make_calling_a_loss():
+    """参数要一个 token 一个 token 写进工具调用（按 output 计价），而 agent 自己算
+    的时候参数已经在上下文里了。所以大参数 + 简单计算的函数，调它比自己算还贵。"""
+    from agentjit.econ import CostModel, Ledger
+
+    c = CostModel(reasoning_tokens=0)
+    assert c.saving("x", {"payload": ["很长的一行"] * 400}, {"n": 400}) < 0
+    assert Ledger(saved=-10.0, synth_cost=100.0, calls=1, ok=1).amortization_point is None
