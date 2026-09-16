@@ -1,150 +1,102 @@
-# 接下来做什么
+# What to do next
 
-按优先级排。每项写清楚**为什么做**、**怎么做**、**做完怎么算完成** —— 没有完成判据的
-条目不该开工。
+In priority order. Each item says **why**, **how**, and **what counts as done** — an item
+with no completion criterion should not be started.
 
-现状见 [README](README.md)：验证管线和合成循环的代码都已完成并测过，但**还没有一次
-真实模型合成的记录**。
-
----
-
-## 0. 阻塞中：跑通一次真实合成
-
-**这是唯一的阻塞项，做完之前不要开新东西。**
-
-本机 OAuth 凭据过期（上次 `ant auth login` 在浏览器授权那步超时了）：
-
-```bash
-ant auth login                              # 完成浏览器授权，别让它超时
-.venv/bin/agentjit compile examples/rank.json
-```
-
-`examples/rank.json`（并列名次跳号 + 同分按字典序）刻意选了一个没在测试里出现过的
-任务 —— 测试里的实现是人写好的，证明不了合成质量。
-
-**为什么它排第一**：整个 M0 的价值主张是"合成 + 验证比 agent 自己做便宜"。
-在跑通之前，下面这些数全是未知：Haiku 几次能修对、一次合成花多少 token、
-结构化反馈到底有没有用（对比"直接重试三次"）、验证关卡会不会在真实生成的代码上
-大量误报。**误报是最该盯的**：语料里的错误实现是人写的，真实模型写出来的代码
-长得不一样，关卡可能在正确代码上卡住。
-
-**完成判据**
-- `agentjit compile examples/rank.json` 产出 `VERIFIED` 的函数
-- 记下：尝试次数、每次卡在哪道关卡、token 消耗
-- 同一个需求跑 5 次，记成功率。一次成功说明不了什么
-
-**顺手要量的对照组**：把 `max_attempts` 设成 1 跑 5 次，和 3 次修复的成功率对比。
-如果两者差不多，说明结构化反馈没起作用，`prompts.py` 的反馈渲染要重做。
+For the current state see the [README](README.md). In one line: **a sentence → generate the
+cases → write the code → verify → fetch it back by name.**
 
 ---
 
-## 1. M0 收尾：让 compile 和 call 真正闭环
+## 0. A different model, and requirements written by someone else
 
-现在只有 `compile`，合成出来的函数用完就扔 —— **省不下任何 token**，因为还不能复用。
+Every number so far rests on one sample: **Claude Haiku 4.5, with requirements written by
+the person running the audit**.
 
-### 1.1 Registry（以测试集为中心）
+What has been measured (`tools/audit_tests.py`, `tools/audit_traps.py`,
+`tools/audit_e2e.py` — all re-runnable):
 
-按 [correctness.md §10](docs/correctness.md#10-测试集是资产代码是可再生的)：存的核心
-是**测试集**，代码只是"当前通过它的一个实现"。
+- 6 requirements × 8 generated cases, expectations **48/48 in agreement** with the
+  reference, and **18/18 of the planted traps** exercised by at least one case
+- **24 compiles across three runs**, every one passing on the first attempt, and every one
+  agreeing with the reference on all 200 random inputs — 4800 in total, zero disagreements
 
-- 落盘：`~/.agentjit/registry/<spec_hash>/{v1,v2}/{code.py,tests.json,report.json,stats.json}`
-- 一个 `spec_hash` 下多版本，按 (验证等级, 复验通过次数, guard 失败率) 排序取最优
-- `agentjit list` / `agentjit inspect <handle>`
+Those numbers look good, but **the audit's oracle and the requirements come from the same
+person**. Someone writing a requirement while knowing what they intend to test writes more
+clearly than they realise, and their reference implementation shares their reading. Those
+two together are a systematic bias.
 
-### 1.2 `call_function`
+How:
 
-- 入参 schema guard → 沙箱执行 → 返回 schema + 后置断言
-- 连续 3 次 guard 失败 → `QUARANTINED`
-- 每次 guard 失败的输入**存进该函数的测试集** —— 这是测试集单调增长的主要来源
+- **Change the model**: run the same 6 requirements through Sonnet and Opus, one round
+  each, and see whether the generated expectations still agree 48/48. **The more valuable
+  variant is a cross-check**: verify model B's code with model A's cases, because every
+  disagreement is a place the requirement failed to say something.
+- **Change the author**: find 5 requirements **written by someone else** (lifted from a
+  real project) and re-run both audits.
+- **Quantify vague requirements**: there is only a qualitative result today (the model does
+  declare its assumptions). What is wanted is a number — N vague requirements × M unsaid
+  decisions, how many were declared, how many missed, how accurate the declarations were.
 
-**完成判据**：`compile` 一次，`call` 200 次，`net_savings` 转正并能打印出来。
-这是 M0/M1 全部意义所在的那个数。
-
----
-
-## 2. M1 最重要的一件事：判据的第二条入口
-
-整个设计押在"调用方愿意给例子"上。这是**唯一的对冲**，做不出来的话
-`EPHEMERAL` 会变成主路径，复用就没了。
-
-按 [correctness.md §5](docs/correctness.md#5-t3--差分测试它其实是歧义定位器)：
-独立合成 N 份实现，在生成输入上比对，**分歧点精确指出需求里没说清的地方**，
-把它变成一道单选题让调用方裁决。不要让调用方出题，让调用方裁决。
-
-**开工前必须先解决的问题**：Opus 5 移除了 `temperature`，传了直接 400
-（见 `llm.py` 的能力表）。制造独立实现只能靠 **prompt 变体**，而变体之间的相关性
-比温度变体高 —— 三份实现可能一起犯同一个错，分歧点就找不出来。
-
-先做个便宜的实验再动手：
-- 拿同一个需求，用 3 种措辞的 prompt 各合成一份，看在生成输入上分歧率有多高
-- 分歧率太低（比如 < 5%）说明这条路在 Opus 5 上不成立，得换方案
-  （换模型混合？换 Haiku 保留 temperature？）
-
-**完成判据**：一个**不给任何例子**的需求，经过裁决后能产出 `VERIFIED` 函数。
+**Done when**: there is a number that still holds up under a different model and a
+different author — or a clear conclusion that it does not.
 
 ---
 
-## 3. M1：变形性质（T2）
+## 1. The scenarios are still narrow
 
-[correctness.md §4](docs/correctness.md#4-t2--变形性质一条性质抵一万个用例)。
-调用方给 3 个例子只验证 3 个点；确认 3 条性质验证的是整个输入空间。
+Up from 4 tasks to 10 (group and sum, tiered fees, counting rows, ranking, log parsing,
+counting working days, flattening nested data, top N per group, stateful aggregation,
+splitting an amount) — but every one is a small pure data transformation, and every one
+fits in under 20 lines.
 
-- 从需求匹配性质模板（置换不变 / 守恒 / 幂等 / 空元 / 值域封闭 ...）
-- 模型提议 → 调用方确认 → 才计入 `CONFIRMED` 门槛
-- **未确认的性质只做警告，绝不阻断**。模型提的性质本身可能是错的，
-  拿一条错的性质否决正确代码，比漏个 bug 难查得多
+Shapes never touched: anything needing helper functions, anything recursive, anything where
+a thousand input rows make complexity matter, anything whose output shape bears no
+resemblance to its input.
 
-**完成判据**：确认的性质能在 200 个生成输入上跑并给出最小化反例。
-
----
-
-## 4. M1：规格归一化 + 三级查找
-
-没有它，换一种说法描述同一需求就命中不了缓存，复用率上不去。
-
-- 文本 → `CanonicalSpec`（归一化 intent + schema）→ `spec_hash`
-- L1 精确 hash → L2 向量近邻 + **schema 结构兼容过滤** → L3 miss
-- **L2 命中必须用本次请求的例子复验**，跑不过就当 miss 去合成新版本 ——
-  这是 [design.md §6.2](docs/design.md#62-例子即规格--本设计的核心主张) 里那道
-  "免费的 guard"
-
-**完成判据**：同一需求换三种说法都命中同一个函数；一个语义相近但行为不同的需求
-（"求和" vs "求平均"）**不会**误命中。
+**Done when**: 10 or more requirements where the implementation is not obvious at a glance
+have been run, with the success rate and the failing gate recorded.
 
 ---
 
-## 5. 需要标定的数字（是调参，不是写功能）
+## 2. Numbers that need calibrating
 
-这些现在都是拍的，等有真实数据再回来定：
+Not many left; after the cull there are four:
 
-| 参数 | 现值 | 问题 |
+| Parameter | Current | The question |
 | --- | --- | --- |
-| `min_mutation_score` | 0.80 | 语料里 95% vs 72% 区分度够，但没在真实数据上标定过；等价变异体还识别不了，白白算进分母 |
-| `holdout_ratio` | 0.3 | 例子本来就少，留 30% 会不会削弱合成质量 |
-| `max_attempts` | 3 | 见第 0 项的对照组实验 |
-| `fuzz_n` | 200 | 够不够碰到边界 |
-| 循环内 `fuzz_n` | 50 | 循环内降采样会不会漏掉该早点反馈的崩溃 |
+| `gen_tests` | 8 | how many cases to write. More costs tokens and raises the chance of a wrong one; fewer leaves the criteria thin |
+| `max_attempts` | 3 | **24 consecutive compiles passed on the first attempt.** The only requirement that ever needed a second was `workdays`, and the root cause turned out to be a sandbox limitation, since fixed. Nothing has pushed against this number, and nothing has exercised the repair loop with a real model since |
+| `lookup.MIN_SIMILARITY` | 0.20 | **script-dependent, so it cannot separate anything on its own.** Chinese: unrelated ~0.03, genuine rewrites 0.29-0.41. English: unrelated 0.21-0.28 (the bigram floor alone), rewrites 0.51-0.54. Either normalise against a per-language baseline, or accept it as a pure cost knob and say so |
+| `llm.CLI_OVERHEAD_TOKENS` | 22200 | the fixed overhead `claude -p` carries on every call, measured against an empty task. It moves with the CLI version |
 
 ---
 
-## 6. 明确**不做**的
+## 3. Explicitly not doing
 
-- **Tier-1（缓存决策序列但不生成代码）** —— 收益区间可能很窄。要么能编译成代码，
-  要么老实走 LLM。等数据说话
-- **[tracing 前端](docs/tracing-frontend.md)** —— M4。但它的优先级比设计文档里
-  写的要高，因为轨迹天然自带 examples，正好补上第 2 项那个"调用方肯不肯给判据"
-  的风险。M1 做完重新评估
-- **容器 / microVM 沙箱** —— M2。现在的子进程沙箱是**正确性沙箱不是安全沙箱**，
-  在跑自己的代码这个前提下够用。接外部不可信来源之前必须升级
-- **能力注入（http / fs / tools / llm facade）** —— M3。纯函数覆盖面比直觉大，
-  先把纯函数这条路走通
+- **Putting the cut gates back** — not unless a real failure demands it. The hold-out split
+  is the only one that would go back voluntarily, and the trigger for that is item 0 finding
+  the model writing answers against the cases it can see
+- **A container or microVM sandbox** — the current subprocess sandbox is a **correctness
+  sandbox, not a security sandbox**, which is enough while it is running your own code. It
+  has to be upgraded before it touches an untrusted source
+- **Capability injection (http / fs / tools)** — pure functions cover more ground than
+  intuition suggests; get pure functions right first
+- **Vector retrieval** — the whole registry is scanned linearly today; revisit when it
+  becomes too big to scan. It is a **performance** optimisation, not a correctness
+  mechanism, and whoever swaps it in must not "optimise away" the re-verification with it
 
 ---
 
-## 开工前先读
+## Read before starting
 
-1. [design.md §4 接口设计](docs/design.md#4-接口设计) —— 四个操作，其余都是实现细节
-2. [correctness.md §2 Oracle 分层](docs/correctness.md#2-oracle-分层) —— 五层判据，
-   哪三层不需要标准答案
-3. `src/agentjit/verify.py` 里 `verify()` 的 docstring —— 覆盖率为什么是
-   "保留集对循环不可见"的例外。这个坑踩过一次
+1. The header of `src/agentjit/propose.py` — one model writing both the code and the tests
+   that judge it is circular; which part of that each of the three mitigations solves, and
+   which part cannot be solved
+2. The header of `src/agentjit/verify.py` — which five gates were cut, why, and which one is
+   most likely to come back
+3. The header of `tools/audit_tests.py` — the audit protocol. The reference implementation
+   has to be written **before** any generated case is seen, or it starts finding reasons why
+   the model's answer was fine
+4. The header of `src/agentjit/lookup.py` — why retrieval is allowed to be crude, and where
+   being crude does not matter

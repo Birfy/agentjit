@@ -1,29 +1,41 @@
-# Tracing 前端（M4，未启动）
+# Tracing front end (M4, not started)
 
-| 字段 | 值 |
+| Field | Value |
 | --- | --- |
-| 状态 | Deferred — 等 [design.md](design.md) 的 M0–M3 跑通后再评估 |
-| 来源 | v0.1 设计的幸存部分 |
+| Status | Deferred — reassess once M0–M3 of [design.md](design.md) are working |
+| Origin | The surviving part of the v0.1 design |
 
-## 它解决什么
+## What it solves
 
-[design.md](design.md) 描述的后端有一个前提：**有人告诉它"编译这个"。**
+The back end described in [design.md](design.md) rests on one premise: **somebody tells
+it "compile this".**
 
-MVP 里这个人是 agent 自己（靠 prompt 指引）或真人。这不可靠——agent 在埋头干活时，很难同时意识到"我这件事已经重复第 7 遍了，该编译成函数"。**人和 agent 都不擅长发现自己的重复。**
+In the MVP that somebody is the agent itself (steered by a prompt) or a person. That is
+unreliable — an agent head-down in its work is in no position to notice "this is the
+seventh time I have done this; it should be a function". **Neither people nor agents are
+good at spotting their own repetition.**
 
-Tracing 前端就是替它们发现，并自动把 `compile_function` 调掉。它不改变后端的任何机制，只是自动生成后端的输入：需求文本 + 例子。
+The tracing front end spots it for them and calls `compile_function` on their behalf. It
+changes nothing about the back end; it just produces the back end's input automatically:
+a requirement text plus examples.
 
 ```
-观察 agent 执行 → 识别重复子任务 → 自动生成 requirement + examples → compile_function
+watch the agent run -> spot repeated subtasks -> generate requirement + examples -> compile_function
 ```
 
-**关键点：轨迹天然就是例子。** [design.md §6.2](design.md#62-例子即规格--本设计的核心主张) 把整个正确性押在"调用方愿意给例子"上，这是后端最大的不确定性。而 tracing 前端的每条轨迹都自带真实的 input/output 对——它把后端最脆的假设变成了副产品。这是做这个前端的**首要理由**，比省掉人工触发重要得多。
+**The key point: a trace is already an example.** [design.md §6.2](design.md) stakes the
+whole correctness story on "the caller is willing to supply examples", which is the back
+end's largest uncertainty. Every trace carries a real input/output pair of its own — the
+front end turns the back end's most fragile assumption into a by-product. That is the
+**primary** reason to build it, far more so than saving a manual trigger.
 
-## 组件
+## Components
 
 ### Tracer
 
-挂在 agent 的 tool 调用链路上，异步记录结构化事件。挂掉不能影响主流程，开销必须可忽略（采样可配，大结果只存摘要）。
+Hooks into the agent's tool-call path and records structured events asynchronously. It
+must not affect the main flow if it fails, and its overhead must be negligible
+(configurable sampling; large results stored as a digest only).
 
 ```python
 @dataclass
@@ -31,79 +43,112 @@ class TraceEvent:
     trace_id: str; seq: int; ts: float
     kind: Literal["tool_call","tool_result","llm_step","task_begin","task_end"]
     tool: str | None
-    args: dict                              # 脱敏后
-    result_digest: str                      # 大结果只存哈希
-    result_preview: Any                     # 截断，供理解语义
-    provenance: dict[str, ValueOrigin]      # 见下
+    args: dict                              # after redaction
+    result_digest: str                      # large results are stored as a hash
+    result_preview: Any                     # truncated, enough to read the semantics
+    provenance: dict[str, ValueOrigin]      # see below
     cost: Cost
     effects: EffectClass
 ```
 
-脱敏是硬要求：轨迹会记录 tool 入参和结果，其中可能有凭据和 PII。已知凭据字段名直接丢弃，值层面跑 secret 检测，Trace Store 加保留期（默认 30 天）和访问控制。
+Redaction is a hard requirement: traces record tool arguments and results, which may
+contain credentials and PII. Known credential field names are dropped outright, values
+go through secret detection, and the trace store gets a retention period (30 days by
+default) and access control.
 
-### 子任务边界
+### Subtask boundaries
 
-| 策略 | 来源 | 可靠性 |
+| Strategy | Source | Reliability |
 | --- | --- | --- |
-| 显式 | agent 声明 `with jit.subtask("拉取月度报表")` | 高 |
-| 结构 | plan step / TODO 项 / subagent 调用的天然边界 | 中高 |
-| 挖掘 | 从 tool-call 序列挖频繁连续子序列 | 中 |
+| Explicit | the agent declares `with jit.subtask("pull the monthly report")` | high |
+| Structural | the natural boundaries of a plan step, a TODO item, a subagent call | medium-high |
+| Mined | frequent contiguous subsequences mined from the tool-call stream | medium |
 
-先做前两种。显式和结构边界自带语义标签，这个标签直接就是 `compile_function` 的 `requirement` 雏形。纯挖掘出来的子序列没有名字，得反过来让模型猜它在干什么，噪声大得多。
+Do the first two first. Explicit and structural boundaries come with a semantic label,
+and that label is already a first draft of `compile_function`'s `requirement`. A purely
+mined subsequence has no name, so a model has to guess what it was doing — much noisier.
 
-### 热点探测
+### Hotspot detection
 
-不是数次数，是**成本加权**：
+Not a call count — **cost-weighted**:
 
 ```
 hotness(sig) = Σ (tokens_spent + λ · wall_clock)
 
-触发条件：
-  hotness > K · estimated_compile_cost     # K ≈ 3，预计回本 3 倍才编
-  AND observations >= 3                    # 少于 3 条做不了可靠的反合一
-  AND variance < V_max                     # 轨迹差异太大说明这不是一件事
+trigger when:
+  hotness > K · estimated_compile_cost     # K ≈ 3: only compile at an expected 3x payback
+  AND observations >= 3                    # fewer than 3 makes anti-unification unreliable
+  AND variance < V_max                     # traces too different means this is not one thing
   AND max_effect_class <= IDEMPOTENT_WRITE
 ```
 
-**宁可少编译，也不要编译出低质量产物。** 一个错误产物的代价（悄悄产出错结果 + 排查成本）远高于一个没编译的热点（就是慢点）。
+**Better to compile too little than to produce something low-quality.** The cost of a
+wrong artefact (quietly producing wrong results, plus the debugging) far exceeds the cost
+of an uncompiled hotspot (it is just slow).
 
-### 参数判定：provenance 比推断可靠
+### Deciding the parameters: provenance beats inference
 
-给定 `read("/data/2026-08/a.csv") → write("/out/2026-08.json")`，哪些是参数？让模型猜会猜对大部分，但错的那部分很难发现。Tracer 直接记录每个值的来源，答案是**读出来的**：
+Given `read("/data/2026-08/a.csv") → write("/out/2026-08.json")`, which parts are
+parameters? Asking a model gets most of them right, and the ones it gets wrong are very
+hard to notice. The tracer records where every value came from, so the answer is
+**read off, not guessed**:
 
-| `ValueOrigin` | 判定 |
+| `ValueOrigin` | Verdict |
 | --- | --- |
-| `USER_INPUT` 来自用户/上游任务输入 | 参数 |
-| `UPSTREAM_OUTPUT` 来自本轨迹前序 tool 输出 | 中间变量，编进代码 |
-| `ENV` 来自环境（cwd、当前日期、配置） | 跨轨迹变化 → 参数；否则 → 环境断言 |
-| `LITERAL` 模型凭空写的常量 | 常量；跨轨迹变化过 → 升格为参数 |
+| `USER_INPUT` — from the user or an upstream task | a parameter |
+| `UPSTREAM_OUTPUT` — from an earlier tool in this trace | an intermediate; compile it into the code |
+| `ENV` — from the environment (cwd, today's date, config) | varies across traces → parameter; otherwise → an environment assertion |
+| `LITERAL` — a constant the model wrote out of nowhere | a constant; promote to a parameter if it ever varies across traces |
 
-配合反合一做**双确认**：两者结论一致才自动触发编译，不一致则多收集几条轨迹或转人工。廉价且高收益。
+Pair it with anti-unification for a **double confirmation**: only trigger a compile
+automatically when the two agree; when they disagree, collect more traces or hand it to a
+person. Cheap, and high return.
 
-### 轨迹规范化
+### Trace normalisation
 
-算签名和做反合一之前要先归一：
+Before computing a signature or anti-unifying, normalise:
 
-1. **值抽象** — 具体值 → 类型化占位符（路径、URL、日期、ID 各成一类）
-2. **无关步骤剔除** — 默认剔除失败重试，保留探索性只读调用（它可能承载了实际的控制流判断）。需实测调参
-3. **顺序归一** — 无依赖的并列调用排序归一，依赖关系从 provenance 图直接得到
-4. **循环折叠** — `read(a) read(b) read(c)` → `for x in [a,b,c]: read(x)`。把展开的循环卷回去，对应 tracing JIT 的 loop detection
+1. **Value abstraction** — concrete values become typed placeholders (paths, URLs, dates
+   and IDs each their own class)
+2. **Dropping irrelevant steps** — failed retries are dropped by default; exploratory
+   read-only calls are kept (they may carry actual control-flow decisions). Needs
+   measurement to tune
+3. **Order normalisation** — independent parallel calls are sorted into a canonical
+   order; the dependencies come straight out of the provenance graph
+4. **Loop folding** — `read(a) read(b) read(c)` → `for x in [a,b,c]: read(x)`. Rolling an
+   unrolled loop back up, the counterpart of loop detection in a tracing JIT
 
-### 反合一（anti-unification）
+### Anti-unification
 
-对齐 N 条同签名轨迹，结构相同、取值不同的位置即参数候选。这是确定性算法，不是让模型猜——模型只负责最后一步的代码合成，任务被压得很窄，可靠性高得多。
+Align N traces sharing a signature; the positions where the structure matches but the
+values differ are the parameter candidates. This is a deterministic algorithm, not a
+model guess — the model is only responsible for the final code synthesis, a much narrower
+task and correspondingly more reliable.
 
-## 自动生成后端输入
+## Generating the back end's input
 
 ```
-轨迹簇 ──┬─→ requirement  ← 语义标签 + 归一化骨架 + 参数表（LLM 润色成自然语言）
-         └─→ examples     ← 每条轨迹的 (输入参数, 最终输出) 直接成对
+a cluster of traces ──┬─→ requirement  ← semantic label + normalised skeleton + parameter
+                      │                  table (an LLM turns it into prose)
+                      └─→ examples     ← each trace's (input parameters, final output)
 ```
 
-留出保留集：N 条轨迹拿 1 条不参与合成，只做验收。这是最基本的防过拟合措施——防止合成器把样本背下来。后端 [design.md §11](design.md#11-风险与开放问题) 里"例子太少不舍得留出"的权衡，在这里不存在：轨迹是持续积累的。
+Hold one out: of N traces, one takes no part in synthesis and is used only for
+acceptance. This is the most basic defence against overfitting — it stops the synthesiser
+from memorising the samples. The trade-off in [design.md §11](design.md) — "too few
+examples to be willing to hold one out" — does not exist here: traces keep accumulating.
 
-## 开放问题
+## Open questions
 
-1. **`variance` 怎么量化才靠谱？** 编辑距离是起点，但"多了一次重试"和"少了一个关键步骤"的距离可能一样，语义权重不同。
-2. **拦截式 vs 工具式分发。** 自动匹配并替换 agent 的执行步骤（对 agent 透明、零 prompt 成本，但误匹配风险高、agent 不知道自己被换了），还是仍然让 agent 显式调用？建议对高置信命中（精确签名匹配 + 验证充分 + guard 失败率低）才升级为拦截式——对应 JIT 从保守内联到激进内联的演进。
-3. **Tracer 的侵入性。** 需要宿主 agent 暴露 tool 调用钩子。不同框架差异很大，可能需要逐个适配，这是"外挂"定位的主要妥协处。
+1. **How do you quantify `variance` in a way that holds up?** Edit distance is a start,
+   but "one extra retry" and "one missing critical step" can be the same distance apart
+   while meaning very different things.
+2. **Interception versus a tool.** Match and replace the agent's execution step
+   automatically (transparent to the agent, zero prompt cost, but a mismatch is dangerous
+   and the agent does not know it was swapped), or keep the agent calling explicitly? The
+   suggestion is to upgrade to interception only for high-confidence hits (exact
+   signature match, thorough verification, low guard-failure rate) — the counterpart of a
+   JIT moving from conservative to aggressive inlining.
+3. **How invasive the tracer is.** It needs the host agent to expose tool-call hooks.
+   Frameworks differ a lot here, so it may need adapting one by one; this is the main
+   compromise in positioning it as a bolt-on component.

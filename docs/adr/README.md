@@ -1,5 +1,6 @@
-# 架构决策记录（ADR）
+# Architecture decision records (ADR)
 
-每个影响系统结构的决策一个文件：`NNNN-短标题.md`，含背景、决策、备选方案、后果。
+One file per decision that shapes the system: `NNNN-short-title.md`, covering the
+context, the decision, the alternatives considered, and the consequences.
 
-尚无记录。
+None recorded yet.

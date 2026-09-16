@@ -1,0 +1,40 @@
+$ agentjit compile examples/rank.json --name rank
+requirement  Rank {name, score} records from highest score to lowest. Records with the same…
+seeds        5   model claude-haiku-4-5   backend cli   cache auto
+~~~
+miss: nothing reusable found
+  wrote 8 extra test cases
+    {"records": [{"name": "alice",…   (Three-way tie causes rank to skip from 1 to 4)
+    {"records": [{"name": "alice",…   (Negative scores ranked lower than zero)
+      ! assumes something the requirement did not say: Scores can be negative and follow st…
+    {"records": [{"name": "zoe", "…   (Names sorted alphabetically within same rank, regard…
+    {"records": [{"name": "alice",…   (Four-way tie causes rank to skip from 1 to 5)
+  attempt 1  passed
+
+  PASS  static                passed
+  PASS  examples.sufficiency  13 case(s)
+  PASS  examples              13/13 passed
+  PASS  return_schema         passed
+
+  level: VERIFIED   took: 47ms
+
+result: ok   tokens 3569in/2154out
+cache: miss   no hit; synthesised a new one
+name rank   handle fn_69889ea0d4c5   v1   level VERIFIED
+~~~
+$ agentjit call rank '{"records":[{"name":"zoe","score":7},{"name":"amy","score":9}]}'
+ok    v1
+[
+  {
+    "name": "amy",
+    "rank": 1
+  },
+  {
+    "name": "zoe",
+    "rank": 2
+  }
+]
+~~~
+$ agentjit list
+NAME              VER    CASES   REQUIREMENT
+rank              v1        13   Rank {name, score} records from highest score to lowest.

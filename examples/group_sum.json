@@ -1,5 +1,5 @@
 {
-  "requirement": "把行按 type 分组，对 amount 求和，返回 {type: 总额}。amount 可能带货币符号和千分位逗号；空字符串或没有数字的按 0 算。",
+  "requirement": "Group rows by their `type` field and sum `amount` within each group, returning {type: total}. The amount may carry a currency symbol and thousands separators and must be cleaned; an empty string or anything with no digits counts as 0.",
   "examples": [
     {
       "input": {
@@ -25,7 +25,7 @@
       },
       "output": {},
       "boundary": true,
-      "note": "空输入"
+      "note": "empty input"
     },
     {
       "input": {
@@ -40,7 +40,7 @@
         "sale": 0.0
       },
       "boundary": true,
-      "note": "空金额按 0"
+      "note": "an empty amount counts as 0"
     },
     {
       "input": {
@@ -72,7 +72,7 @@
         "fee": -25.5
       },
       "boundary": true,
-      "note": "负数"
+      "note": "negative"
     }
   ]
 }

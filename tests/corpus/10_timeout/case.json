@@ -1,9 +1,9 @@
 {
   "name": "10_timeout",
-  "why": "沙箱关卡：写错循环条件，永不退出 —— 靠父进程墙钟兜住",
+  "why": "sandbox gate: wrong loop condition, never exits — the parent's wall clock catches it",
   "impl": "impl.py",
   "spec": {
-    "intent": "把行按 type 分组对 amount 求和；amount 可能带货币符号和千分位逗号，空值按 0 算",
+    "intent": "group rows by type and sum amount; amount may carry a currency symbol and thousands separators, blank counts as 0",
     "param_schema": {
       "type": "object",
       "properties": {
@@ -63,7 +63,7 @@
       },
       "output": {},
       "boundary": true,
-      "note": "空输入"
+      "note": "empty input"
     },
     {
       "input": {
@@ -78,7 +78,7 @@
         "sale": 0.0
       },
       "boundary": true,
-      "note": "空金额按 0 算"
+      "note": "blank amount counts as 0"
     },
     {
       "input": {
@@ -110,13 +110,13 @@
         "fee": -25.5
       },
       "boundary": true,
-      "note": "负数"
+      "note": "negative"
     }
   ],
   "expect": {
     "level": "REJECTED",
     "failing_gates": [
-      "examples.visible"
+      "examples"
     ]
   }
 }

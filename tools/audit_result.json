@@ -1,0 +1,1344 @@
+[
+  {
+    "key": "logs",
+    "shape": "text parsing",
+    "requirement": "Parse log lines into structured records. Each line looks like `2024-01-05 12:03:44 ERROR [svc-auth] the message body goes here`: a date, a time, a level, a service name in square brackets, and then everything that is left as the message body. The level is one of DEBUG/INFO/WARN/ERROR. The message body may contain square brackets of its own, so the **first** `]` is what ends the service name. Strip leading and trailing whitespace from each line first; a line that is empty after stripping is skipped and does not appear in the output. Return [{date, time, level, service, message}] in the input order.",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "lines": [
+            "  2024-01-05 12:03:44 ERROR [svc-auth] login failed  "
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          }
+        ],
+        "note": "leading and trailing whitespace on the line is stripped before parsing",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "",
+            "   "
+          ]
+        },
+        "model": [],
+        "reference": [],
+        "note": "empty lines and lines with only whitespace are skipped",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] login [attempt 1] failed"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login [attempt 1] failed"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login [attempt 1] failed"
+          }
+        ],
+        "note": "message body can contain square brackets; only the first ] ends the service name",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 DEBUG [svc-core] initialization started"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "DEBUG",
+            "service": "svc-core",
+            "message": "initialization started"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "DEBUG",
+            "service": "svc-core",
+            "message": "initialization started"
+          }
+        ],
+        "note": "DEBUG is a valid log level",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 INFO [svc-api] request received"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "INFO",
+            "service": "svc-api",
+            "message": "request received"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "INFO",
+            "service": "svc-api",
+            "message": "request received"
+          }
+        ],
+        "note": "INFO is a valid log level",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 WARN [svc-db] connection pool exhausted"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "WARN",
+            "service": "svc-db",
+            "message": "connection pool exhausted"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "WARN",
+            "service": "svc-db",
+            "message": "connection pool exhausted"
+          }
+        ],
+        "note": "WARN is a valid log level",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth]"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": ""
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": ""
+          }
+        ],
+        "note": "message body can be empty when nothing follows the closing bracket",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] login failed",
+            "",
+            "   ",
+            "2024-01-05 12:03:44 INFO [svc-api] request received"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "INFO",
+            "service": "svc-api",
+            "message": "request received"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "INFO",
+            "service": "svc-api",
+            "message": "request received"
+          }
+        ],
+        "note": "empty lines interspersed in input are skipped; non-empty lines returned in input order",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      1082,
+      7595
+    ]
+  },
+  {
+    "key": "workdays",
+    "shape": "date arithmetic",
+    "requirement": "Given two dates start and end (YYYY-MM-DD strings), count the working days in the interval. **Both endpoints are included.** A working day is Monday to Friday; holidays are not considered. If start is later than end, return 0. Return {days: integer}.",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "start": "2024-01-01",
+          "end": "2024-01-01"
+        },
+        "model": {
+          "days": 1
+        },
+        "reference": {
+          "days": 1
+        },
+        "note": "Single working day (Monday) counts as 1; both endpoints included",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-06",
+          "end": "2024-01-06"
+        },
+        "model": {
+          "days": 0
+        },
+        "reference": {
+          "days": 0
+        },
+        "note": "Single non-working day (Saturday) counts as 0",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-10",
+          "end": "2024-01-01"
+        },
+        "model": {
+          "days": 0
+        },
+        "reference": {
+          "days": 0
+        },
+        "note": "start > end returns 0 as specified",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-01",
+          "end": "2024-01-06"
+        },
+        "model": {
+          "days": 5
+        },
+        "reference": {
+          "days": 5
+        },
+        "note": "Mon–Sat interval: working days Mon–Fri (Saturday excluded)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-05",
+          "end": "2024-01-08"
+        },
+        "model": {
+          "days": 2
+        },
+        "reference": {
+          "days": 2
+        },
+        "note": "Fri–Mon spanning weekend: Friday + Monday = 2 working days",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-01",
+          "end": "2024-01-12"
+        },
+        "model": {
+          "days": 10
+        },
+        "reference": {
+          "days": 10
+        },
+        "note": "Two full work weeks (Mon–Fri, Mon–Fri) = 10 working days",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-06",
+          "end": "2024-01-10"
+        },
+        "model": {
+          "days": 3
+        },
+        "reference": {
+          "days": 3
+        },
+        "note": "Sat–Wed: weekend days skipped, includes Mon–Wed (3 working days)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-07",
+          "end": "2024-01-12"
+        },
+        "model": {
+          "days": 5
+        },
+        "reference": {
+          "days": 5
+        },
+        "note": "Sun–Fri: Sunday skipped, includes Mon–Fri (5 working days)",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      958,
+      4133
+    ]
+  },
+  {
+    "key": "flatten",
+    "shape": "restructuring nested data",
+    "requirement": "Flatten a nested dict into a single level, joining the keys along each path with a dot, so `{'a': {'b': 1}}` becomes `{'a.b': 1}`. Only a dict is descended into; an array counts as an ordinary value and is kept as it is, not expanded. **An empty dict used as a value is discarded** and produces no key at all. Return the flattened dict.",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": 1,
+              "c": 2
+            }
+          }
+        },
+        "model": {
+          "a.b": 1,
+          "a.c": 2
+        },
+        "reference": {
+          "a.b": 1,
+          "a.c": 2
+        },
+        "note": "Multiple keys at the same nested level are each flattened separately",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": {
+                "c": 1
+              }
+            }
+          }
+        },
+        "model": {
+          "a.b.c": 1
+        },
+        "reference": {
+          "a.b.c": 1
+        },
+        "note": "Deep nesting (3+ levels) joins all path components with dots",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {}
+          }
+        },
+        "model": {},
+        "reference": {},
+        "note": "Empty dict used as a value is discarded entirely, no key produced",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": {}
+            }
+          }
+        },
+        "model": {},
+        "reference": {},
+        "note": "Empty dict at any depth in a path discards the entire branch",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": 1
+            },
+            "c": {}
+          }
+        },
+        "model": {
+          "a.b": 1
+        },
+        "reference": {
+          "a.b": 1
+        },
+        "note": "Some paths yield output while others (ending in empty dicts) yield none",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": [
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        "model": {
+          "a": [
+            1,
+            2,
+            3
+          ]
+        },
+        "reference": {
+          "a": [
+            1,
+            2,
+            3
+          ]
+        },
+        "note": "Arrays are not descended into; preserved as leaf values unchanged",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": [
+                1,
+                2
+              ]
+            }
+          }
+        },
+        "model": {
+          "a.b": [
+            1,
+            2
+          ]
+        },
+        "reference": {
+          "a.b": [
+            1,
+            2
+          ]
+        },
+        "note": "Arrays nested in dicts retain their structure after flattening",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "x": 1,
+            "y": {
+              "z": 2
+            },
+            "w": {}
+          }
+        },
+        "model": {
+          "x": 1,
+          "y.z": 2
+        },
+        "reference": {
+          "x": 1,
+          "y.z": 2
+        },
+        "note": "Each top-level branch is flattened independently; empty dicts are silently dropped",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      977,
+      6771
+    ]
+  },
+  {
+    "key": "topn",
+    "shape": "top N per group",
+    "requirement": "Group {name, dept, salary} records by dept and take the top 2 in each group by salary, **highest first**. Records on the same salary are ordered by name, lexicographically. A group with fewer than 2 people gives however many it has. Return [{dept, top}], where top is an array of names; the outer array is sorted by dept, lexicographically ascending.",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "bob",
+              "dept": "x",
+              "salary": 20
+            },
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 20
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "note": "Equal salary: names ordered lexicographically (alice before bob)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "sales",
+              "salary": 100
+            },
+            {
+              "name": "bob",
+              "dept": "eng",
+              "salary": 90
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "eng",
+            "top": [
+              "bob"
+            ]
+          },
+          {
+            "dept": "sales",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "eng",
+            "top": [
+              "bob"
+            ]
+          },
+          {
+            "dept": "sales",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "note": "Multiple departments: outer array sorted lexicographically by dept name",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 100
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "note": "Single person in group: returns that one person (fewer than 2)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 30
+            },
+            {
+              "name": "bob",
+              "dept": "x",
+              "salary": 50
+            },
+            {
+              "name": "charlie",
+              "dept": "x",
+              "salary": 20
+            },
+            {
+              "name": "diana",
+              "dept": "x",
+              "salary": 40
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "bob",
+              "diana"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "bob",
+              "diana"
+            ]
+          }
+        ],
+        "note": "Four people in group: select top 2 by salary (highest first)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "charlie",
+              "dept": "x",
+              "salary": 50
+            },
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 50
+            },
+            {
+              "name": "bob",
+              "dept": "x",
+              "salary": 50
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "note": "All three people at same salary: tiebreaker orders by name, take top 2",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 60
+            },
+            {
+              "name": "bob",
+              "dept": "x",
+              "salary": 40
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "note": "Exactly 2 people: returns both ordered by salary (highest first)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 100
+            },
+            {
+              "name": "bob",
+              "dept": "x",
+              "salary": 50
+            },
+            {
+              "name": "charlie",
+              "dept": "x",
+              "salary": 50
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "alice",
+              "bob"
+            ]
+          }
+        ],
+        "note": "Positions 2-3 tied on salary: name tiebreaker (bob < charlie) determines inclusion",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "y",
+              "salary": 100
+            },
+            {
+              "name": "bob",
+              "dept": "x",
+              "salary": 90
+            },
+            {
+              "name": "charlie",
+              "dept": "x",
+              "salary": 90
+            },
+            {
+              "name": "diana",
+              "dept": "y",
+              "salary": 80
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "bob",
+              "charlie"
+            ]
+          },
+          {
+            "dept": "y",
+            "top": [
+              "alice",
+              "diana"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "bob",
+              "charlie"
+            ]
+          },
+          {
+            "dept": "y",
+            "top": [
+              "alice",
+              "diana"
+            ]
+          }
+        ],
+        "note": "Multiple departments with varying group sizes; dept x has tie at top positions",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      1052,
+      10612
+    ]
+  },
+  {
+    "key": "uptime",
+    "shape": "stateful aggregation",
+    "requirement": "Given a series of events {ts, event}, where ts is an integer number of seconds and event is either 'start' or 'stop', process them in the input order (**do not re-sort them**) and compute the total running time in seconds. The rules: a stop that follows a start closes that stretch and it counts towards the total; a start that arrives while already running is **ignored**; a stop that arrives while not running is **ignored**; and a final start with no matching stop does not count. Return {seconds: integer}.",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 10,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 0
+        },
+        "reference": {
+          "seconds": 0
+        },
+        "note": "Stop without matching start is ignored",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 0
+        },
+        "reference": {
+          "seconds": 0
+        },
+        "note": "Final start with no matching stop does not count",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "Start while already running is ignored; stop closes the first start",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 15,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "Stop while not running is ignored",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "stop"
+            },
+            {
+              "ts": 10,
+              "event": "start"
+            },
+            {
+              "ts": 15,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "Multiple complete cycles sum (5 + 5 seconds)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "stop"
+            },
+            {
+              "ts": 10,
+              "event": "start"
+            },
+            {
+              "ts": 12,
+              "event": "start"
+            },
+            {
+              "ts": 20,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 15
+        },
+        "reference": {
+          "seconds": 15
+        },
+        "note": "Multiple cycles with ignored duplicate start (5 + 10 seconds)",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 5,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 0
+        },
+        "reference": {
+          "seconds": 0
+        },
+        "note": "Zero-duration interval when start and stop have identical timestamps",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 15,
+              "event": "stop"
+            },
+            {
+              "ts": 20,
+              "event": "start"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "Complex: duplicate start ignored, second stop ignored, final unmatched start not counted",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      1022,
+      4553
+    ]
+  },
+  {
+    "key": "split",
+    "shape": "splitting an amount (rounding)",
+    "requirement": "Split total (an integer number of cents) in proportion to weights (an array of positive integers). Each item first gets total * w / sum(weights), **rounded down**. Then hand out the remaining cents one at a time: **in descending order of weight**, give each item one more cent in turn, breaking a tie in weight by the lower index, until the remainder is gone. The result must sum to exactly total. Return an array of integers in the same order as weights.",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "total": 42,
+          "weights": [
+            1
+          ]
+        },
+        "model": [
+          42
+        ],
+        "reference": [
+          42
+        ],
+        "note": "Single weight with no remainder",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 107,
+          "weights": [
+            1,
+            1,
+            1
+          ]
+        },
+        "model": [
+          36,
+          36,
+          35
+        ],
+        "reference": [
+          36,
+          36,
+          35
+        ],
+        "note": "Equal weights with remainder > 1 distributed by index tiebreak",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 100,
+          "weights": [
+            5,
+            3,
+            3
+          ]
+        },
+        "model": [
+          46,
+          27,
+          27
+        ],
+        "reference": [
+          46,
+          27,
+          27
+        ],
+        "note": "Highest weight gets remainder when others are tied",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 100,
+          "weights": [
+            3,
+            3,
+            1
+          ]
+        },
+        "model": [
+          43,
+          43,
+          14
+        ],
+        "reference": [
+          43,
+          43,
+          14
+        ],
+        "note": "When two weights tie for highest, remainder goes to lower index",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 101,
+          "weights": [
+            4,
+            3,
+            2,
+            1
+          ]
+        },
+        "model": [
+          41,
+          30,
+          20,
+          10
+        ],
+        "reference": [
+          41,
+          30,
+          20,
+          10
+        ],
+        "note": "Monotonically decreasing weights with remainder 1",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 107,
+          "weights": [
+            4,
+            3,
+            2,
+            1
+          ]
+        },
+        "model": [
+          43,
+          33,
+          21,
+          10
+        ],
+        "reference": [
+          43,
+          33,
+          21,
+          10
+        ],
+        "note": "Multiple remainder cents distributed strictly in descending weight order",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 103,
+          "weights": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "model": [
+          26,
+          26,
+          26,
+          25
+        ],
+        "reference": [
+          26,
+          26,
+          26,
+          25
+        ],
+        "note": "Remainder distributed to first N items in index order when all weights equal",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 110,
+          "weights": [
+            5,
+            3,
+            3,
+            1
+          ]
+        },
+        "model": [
+          46,
+          28,
+          27,
+          9
+        ],
+        "reference": [
+          46,
+          28,
+          27,
+          9
+        ],
+        "note": "Remainder of 2 distributed across mixed weights, with index tiebreak for equal weights",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      995,
+      10350
+    ]
+  }
+]

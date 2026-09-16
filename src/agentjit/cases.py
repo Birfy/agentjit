@@ -1,4 +1,5 @@
-"""语料用例的加载。一个用例 = 一份实现 + 一份规格 + 它该得到什么结论。"""
+"""Loading corpus cases. A case is an implementation, a spec, and the verdict it
+should receive."""
 from __future__ import annotations
 
 import json
@@ -11,12 +12,12 @@ from .types import Example, Spec
 @dataclass
 class Case:
     name: str
-    why: str                      # 这个用例要证明哪道关卡有效
+    why: str                      # which gate this case is meant to exercise
     source: str
     spec: Spec
     examples: list[Example]
     expect_level: str
-    expect_failing: list[str]     # 预期不通过的关卡名
+    expect_failing: list[str]     # the gates expected to fail
     path: Path
 
     @classmethod

@@ -1,0 +1,302 @@
+[
+  {
+    "key": "logs",
+    "shape": "text parsing",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 2,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 139,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    lines = params.get(\"lines\", [])\n    result = []\n    \n    for line in lines:\n        # Strip leading and trailing whitespace\n        line = line.strip()\n        \n        # Skip empty lines\n        if not line:\n            continue\n        \n        # Parse: date time level [service] message\n        parts = line.split(None, 3)  # Split on whitespace, max 4 parts\n        \n        if len(parts) < 4:\n            continue\n        \n        date = parts[0]\n        time = parts[1]\n        level = parts[2]\n        remainder = parts[3]\n        \n        # Find [service] using first [ and first ]\n        bracket_start = remainder.find('[')\n        bracket_end = remainder.find(']')\n        \n        if bracket_start == -1 or bracket_end == -1 or bracket_end < bracket_start:\n            continue\n        \n        service = remainder[bracket_start + 1:bracket_end].strip()\n        message = remainder[bracket_end + 1:].strip()\n        \n        result.append({\n            \"date\": date,\n            \"time\": time,\n            \"level\": level,\n            \"service\": service,\n            \"message\": message\n        })\n    \n    return result"
+  },
+  {
+    "key": "logs",
+    "shape": "text parsing",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 3,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 195,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    lines = params.get(\"lines\", [])\n    result = []\n    \n    for line in lines:\n        # Strip leading and trailing whitespace\n        stripped = line.strip()\n        \n        # Skip empty lines\n        if not stripped:\n            continue\n        \n        # Split into date, time, level, and rest\n        parts = stripped.split(None, 3)\n        \n        if len(parts) < 4:\n            continue\n        \n        date = parts[0]\n        time = parts[1]\n        level = parts[2]\n        rest = parts[3]\n        \n        # Find service name in square brackets\n        open_bracket = rest.find('[')\n        close_bracket = rest.find(']', open_bracket)\n        \n        if open_bracket == -1 or close_bracket == -1:\n            continue\n        \n        service = rest[open_bracket + 1:close_bracket]\n        \n        # Message is everything after the ]\n        message = rest[close_bracket + 1:].strip()\n        \n        result.append({\n            \"date\": date,\n            \"time\": time,\n            \"level\": level,\n            \"service\": service,\n            \"message\": message\n        })\n    \n    return result"
+  },
+  {
+    "key": "workdays",
+    "shape": "date arithmetic",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 61,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    start = datetime.date.fromisoformat(params['start'])\n    end = datetime.date.fromisoformat(params['end'])\n    \n    if start > end:\n        return {'days': 0}\n    \n    count = 0\n    current = start\n    while current <= end:\n        if current.weekday() < 5:  # Monday (0) through Friday (4)\n            count += 1\n        current += datetime.timedelta(days=1)\n    \n    return {'days': count}"
+  },
+  {
+    "key": "workdays",
+    "shape": "date arithmetic",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 56,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    start_str = params[\"start\"]\n    end_str = params[\"end\"]\n    \n    # Parse dates using fromisoformat\n    start_date = datetime.date.fromisoformat(start_str)\n    end_date = datetime.date.fromisoformat(end_str)\n    \n    # If start is later than end, return 0\n    if start_date > end_date:\n        return {\"days\": 0}\n    \n    # Count working days (Monday=0 to Friday=4)\n    count = 0\n    current_date = start_date\n    while current_date <= end_date:\n        if current_date.weekday() < 5:  # Monday to Friday\n            count += 1\n        current_date += datetime.timedelta(days=1)\n    \n    return {\"days\": count}"
+  },
+  {
+    "key": "flatten",
+    "shape": "restructuring nested data",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 123,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    obj = params['obj']\n    \n    def flatten(d, prefix=''):\n        result = {}\n        for key, value in d.items():\n            full_key = f\"{prefix}.{key}\" if prefix else key\n            if isinstance(value, dict):\n                # Recursively flatten the dict\n                flattened = flatten(value, full_key)\n                # Only add if the flattened result is not empty\n                result.update(flattened)\n            else:\n                # Add the value as is (arrays, scalars, None, etc.)\n                result[full_key] = value\n        return result\n    \n    return flatten(obj)"
+  },
+  {
+    "key": "flatten",
+    "shape": "restructuring nested data",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 1,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 93,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    obj = params['obj']\n    \n    def flatten(d):\n        result = {}\n        for key, value in d.items():\n            if isinstance(value, dict):\n                flattened = flatten(value)\n                if flattened:\n                    for fk, fv in flattened.items():\n                        result[key + '.' + fk] = fv\n            else:\n                result[key] = value\n        return result\n    \n    return flatten(obj)"
+  },
+  {
+    "key": "topn",
+    "shape": "top N per group",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 78,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    rows = params[\"rows\"]\n    \n    # Group by department\n    groups = {}\n    for row in rows:\n        dept = row[\"dept\"]\n        if dept not in groups:\n            groups[dept] = []\n        groups[dept].append(row)\n    \n    # Process each group, sorted by department name\n    result = []\n    for dept in sorted(groups.keys()):\n        group = groups[dept]\n        # Sort by salary descending, then by name ascending\n        sorted_group = sorted(group, key=lambda x: (-x[\"salary\"], x[\"name\"]))\n        # Take top 2\n        top_names = [person[\"name\"] for person in sorted_group[:2]]\n        result.append({\"dept\": dept, \"top\": top_names})\n    \n    return result"
+  },
+  {
+    "key": "topn",
+    "shape": "top N per group",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 1,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 80,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    rows = params.get('rows', [])\n    \n    # Group by department\n    groups = {}\n    for row in rows:\n        dept = row['dept']\n        if dept not in groups:\n            groups[dept] = []\n        groups[dept].append(row)\n    \n    # Process each group\n    result = []\n    for dept in sorted(groups.keys()):\n        group = groups[dept]\n        # Sort by salary (descending), then by name (ascending)\n        sorted_group = sorted(group, key=lambda x: (-x['salary'], x['name']))\n        # Take top 2 and extract names\n        top_names = [person['name'] for person in sorted_group[:2]]\n        result.append({'dept': dept, 'top': top_names})\n    \n    return result"
+  },
+  {
+    "key": "uptime",
+    "shape": "stateful aggregation",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 1,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 102,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    events = params.get(\"events\", [])\n    \n    total = 0\n    running = False\n    start_ts = None\n    \n    for event_obj in events:\n        ts = event_obj[\"ts\"]\n        event = event_obj[\"event\"]\n        \n        if event == \"start\":\n            if not running:\n                running = True\n                start_ts = ts\n        elif event == \"stop\":\n            if running:\n                total += ts - start_ts\n                running = False\n    \n    return {\"seconds\": total}"
+  },
+  {
+    "key": "uptime",
+    "shape": "stateful aggregation",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 1,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 147,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    events = params.get(\"events\", [])\n    \n    total_seconds = 0\n    is_running = False\n    start_ts = None\n    \n    for event_obj in events:\n        ts = event_obj[\"ts\"]\n        event = event_obj[\"event\"]\n        \n        if event == \"start\":\n            if not is_running:\n                is_running = True\n                start_ts = ts\n        elif event == \"stop\":\n            if is_running:\n                total_seconds += ts - start_ts\n                is_running = False\n    \n    return {\"seconds\": total_seconds}"
+  },
+  {
+    "key": "split",
+    "shape": "splitting an amount (rounding)",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 144,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    total = params[\"total\"]\n    weights = params[\"weights\"]\n    \n    sum_weights = sum(weights)\n    \n    # Base distribution (rounded down)\n    result = [total * w // sum_weights for w in weights]\n    \n    # Calculate remainder\n    remainder = total - sum(result)\n    \n    # Create sorted order: descending by weight, ascending by index\n    order = sorted(range(len(weights)), key=lambda i: (-weights[i], i))\n    \n    # Distribute remainder\n    for i in range(remainder):\n        result[order[i]] += 1\n    \n    return result"
+  },
+  {
+    "key": "split",
+    "shape": "splitting an amount (rounding)",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 1,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "passed"
+    ],
+    "summaries": [
+      "all cases passed"
+    ],
+    "failed_code": [],
+    "secs": 144,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    total = params['total']\n    weights = params['weights']\n    \n    if not weights:\n        return []\n    \n    sum_weights = sum(weights)\n    if sum_weights == 0:\n        return [0] * len(weights)\n    \n    # Initial distribution: floor of proportional share\n    result = [total * w // sum_weights for w in weights]\n    \n    # Calculate remainder\n    remainder = total - sum(result)\n    \n    # Sort indices by descending weight, then ascending index\n    sorted_indices = sorted(range(len(weights)), key=lambda i: (-weights[i], i))\n    \n    # Distribute remainder one cent at a time\n    for i in range(remainder):\n        result[sorted_indices[i]] += 1\n    \n    return result"
+  }
+]

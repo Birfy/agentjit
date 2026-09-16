@@ -1,4 +1,4 @@
-"""验证管线的数据模型。"""
+"""Data model for the verification pipeline."""
 from __future__ import annotations
 
 import math
@@ -8,27 +8,56 @@ from typing import Any
 
 
 class Level(str, Enum):
-    """验证等级。见 docs/correctness.md §11。"""
+    """The verdict.
 
-    REJECTED = "REJECTED"        # 静态检查都没过，不该进沙箱
-    EPHEMERAL = "EPHEMERAL"      # 能跑，但拿不出验收判据 —— 不进持久缓存
-    VERIFIED = "VERIFIED"        # 全部关卡通过
-    CONFIRMED = "CONFIRMED"      # VERIFIED + 调用方确认的变形性质（M1）
+    Three levels, because there are only three questions: does it get into the sandbox,
+    is there anything to judge it against, and did it pass? (There used to be a
+    CONFIRMED level for caller-confirmed metamorphic properties; that machinery was
+    removed, so the value went with it rather than sit there unreachable.)
+    """
+
+    REJECTED = "REJECTED"        # failed the static check, or failed a test case
+    EPHEMERAL = "EPHEMERAL"      # runs, but nothing to judge it by — never cached
+    VERIFIED = "VERIFIED"        # passed every test case
 
 
 @dataclass
 class Example:
-    """一组输入/输出判据。"""
+    """One input/output criterion."""
 
     input: dict[str, Any]
     output: Any
     note: str = ""
-    boundary: bool = False       # 是否边界用例；VERIFIED 要求至少一个
+    boundary: bool = False       # a label for humans; it does not affect the verdict
+    # Where this criterion came from. Cases only accumulate, and a year from now the
+    # only thing that can answer "why is this the expected value" is its provenance.
+    origin: str = "caller"       # caller | generated | reverify | manual
+    # This expectation rests on a decision the requirement **did not make** — for
+    # instance which way 0.5 rounds. Empty string means it follows from the text.
+    #
+    # The field exists because measurement forced it: given a vague "deduplicate a list
+    # of records", the model wrote "compare whole records", "keep the first", and
+    # "preserve order" into its cases as settled fact, when the requirement said none
+    # of them. Those cases then become criteria — and a caller who read it the other way
+    # has their correct implementation condemned. So an assumption has to be **recorded
+    # and stated**, not buried inside an expected value.
+    assumes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"input": self.input, "output": self.output, "note": self.note,
+                "boundary": self.boundary, "origin": self.origin,
+                "assumes": self.assumes}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Example":
+        return cls(input=d["input"], output=d["output"], note=d.get("note", ""),
+                   boundary=d.get("boundary", False), origin=d.get("origin", "caller"),
+                   assumes=d.get("assumes", ""))
 
 
 @dataclass
 class Spec:
-    """一个待验证函数的规格。M0 只覆盖纯函数。"""
+    """The spec of a function to be verified. Pure functions only, for now."""
 
     intent: str
     param_schema: dict[str, Any]
@@ -37,16 +66,25 @@ class Spec:
     timeout_ms: int = 5000
     mem_mb: int = 512
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"intent": self.intent, "param_schema": self.param_schema,
+                "return_schema": self.return_schema, "entry": self.entry,
+                "timeout_ms": self.timeout_ms, "mem_mb": self.mem_mb}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Spec":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
 
 @dataclass
 class GateResult:
-    """一道关卡的结论。"""
+    """The verdict from one gate."""
 
     name: str
     passed: bool
     summary: str
     detail: dict[str, Any] = field(default_factory=dict)
-    blocking: bool = True        # False = 警告性关卡，不阻断（见 correctness.md §4.2）
+    blocking: bool = True        # False = advisory only, does not fail the run
 
     @property
     def icon(self) -> str:
@@ -54,10 +92,19 @@ class GateResult:
             return "PASS"
         return "FAIL" if self.blocking else "WARN"
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "passed": self.passed, "summary": self.summary,
+                "detail": self.detail, "blocking": self.blocking}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "GateResult":
+        return cls(name=d["name"], passed=d["passed"], summary=d["summary"],
+                   detail=d.get("detail") or {}, blocking=d.get("blocking", True))
+
 
 @dataclass
 class Report:
-    """一次完整验证的结论。"""
+    """The verdict from a full verification run."""
 
     level: Level
     gates: list[GateResult] = field(default_factory=list)
@@ -74,13 +121,23 @@ class Report:
         w = max((len(g.name) for g in self.gates), default=0)
         lines = [f"{g.icon}  {g.name.ljust(w)}  {g.summary}" for g in self.gates]
         lines.append("")
-        lines.append(f"级别: {self.level.value}   耗时: {self.wall_ms:.0f}ms")
+        lines.append(f"level: {self.level.value}   took: {self.wall_ms:.0f}ms")
         return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"level": self.level.value, "wall_ms": self.wall_ms,
+                "gates": [g.to_dict() for g in self.gates]}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Report":
+        return cls(level=Level(d["level"]), wall_ms=d.get("wall_ms", 0.0),
+                   gates=[GateResult.from_dict(g) for g in d.get("gates", [])])
 
 
 def deep_equal(a: Any, b: Any, rel_tol: float = 1e-9, abs_tol: float = 1e-12) -> bool:
-    """比较两个 JSON 值。数值给容差 —— 生成的代码用浮点算钱是常态，
-    要求 bit 级相等会把正确的实现判错。"""
+    """Compare two JSON values, with a tolerance on numbers — generated code does money
+    arithmetic in floats all the time, and demanding bit equality condemns correct
+    implementations."""
     if isinstance(a, bool) or isinstance(b, bool):
         return a is b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
