@@ -37,7 +37,6 @@ class CallResult:
 class RunResult:
     ok: bool                                  # did the process itself finish normally
     results: list[CallResult] = field(default_factory=list)
-    coverage: dict[str, Any] | None = None
     load_error: str = ""                      # the code failed to load or compile
     timed_out: bool = False
     killed: str = ""                          # "timeout" | "memory" | "signal:SIGxxx"
@@ -112,7 +111,6 @@ class Sandbox:
         entry: str,
         calls: list[dict[str, Any]],
         *,
-        coverage: bool = False,
         timeout_ms: int = 5000,
         mem_mb: int = 512,
     ) -> RunResult:
@@ -124,7 +122,6 @@ class Sandbox:
                 "code_path": str(code_path),
                 "entry": entry,
                 "calls": calls,
-                "coverage": coverage,
                 "timeout_ms": timeout_ms,
                 "mem_mb": mem_mb,
             })
@@ -172,7 +169,6 @@ class Sandbox:
             results=[CallResult(**r) if r["ok"] else
                      CallResult(ok=False, error=r.get("error", ""), tb=r.get("tb", ""))
                      for r in payload["results"]],
-            coverage=payload.get("coverage"),
             load_error=payload.get("load_error") or "",
             wall_ms=wall,
         )

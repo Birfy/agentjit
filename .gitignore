@@ -19,3 +19,6 @@ build/
 
 # the raw capture from tools/capture_demo.sh; docs/demo.txt is the curated one
 docs/demo.raw.txt
+
+# build output
+dist/

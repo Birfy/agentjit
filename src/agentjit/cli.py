@@ -11,7 +11,12 @@ from .cases import Case, load_all
 from .types import Example
 from .verify import Thresholds, verify
 
-CORPUS = Path(__file__).resolve().parents[2] / "tests" / "corpus"
+# The corpus ships inside the package. It used to be resolved relative to the source
+# tree, which meant `agentjit selftest` — the command the README tells you to run
+# straight after installing — only worked from a git checkout. It is also the one
+# check worth running on a new machine: how the sandbox contains a memory bomb is
+# platform-dependent, so "does it behave here" is a real question.
+CORPUS = Path(__file__).with_name("corpus")
 
 
 def _print_details(report, verbose: bool) -> None:

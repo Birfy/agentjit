@@ -1,0 +1,91 @@
+name: Release
+
+# Publishing is deliberate: it runs when a GitHub Release is *published*, not on every
+# tag push. A tag is cheap to create by accident; a release is not, and a version on
+# PyPI can never be reused even after it is deleted.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Where to publish
+        type: choice
+        default: testpypi
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e ".[dev]"
+
+      # Never publish something that has not passed its own checks. This duplicates CI
+      # on purpose: CI green on a branch says nothing about the commit being released.
+      - run: pytest -q
+      - run: agentjit selftest
+
+      # The tag and the version must agree. Getting this wrong means shipping 0.0.1 as
+      # v0.0.2, which cannot be undone — PyPI does not allow a version to be re-uploaded.
+      - name: Check the tag matches the version
+        if: github.event_name == 'release'
+        run: |
+          version=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject version $version"
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches version $version"
+
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/agent-jit
+    permissions:
+      id-token: write          # Trusted Publishing: OIDC, no stored secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: build
+    if: github.event_name == 'release' || inputs.repository == 'pypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/agent-jit
+    permissions:
+      id-token: write          # Trusted Publishing: OIDC, no stored secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

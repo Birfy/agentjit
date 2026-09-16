@@ -4,9 +4,11 @@
 
 **Stop your agent re-deriving the same function 200 times. Compile it once.**
 
+[![CI](https://github.com/Birfy/agentjit/actions/workflows/ci.yml/badge.svg)](https://github.com/Birfy/agentjit/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-jit?color=3775a9&logo=pypi&logoColor=white)](https://pypi.org/project/agent-jit/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![tests](https://img.shields.io/badge/tests-102%20passing-5ac489)](tests/)
-[![corpus](https://img.shields.io/badge/corpus-6%2F6-5ac489)](tests/corpus/)
+[![corpus](https://img.shields.io/badge/corpus-6%2F6-5ac489)](src/agentjit/corpus/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![status](https://img.shields.io/badge/status-working%20prototype-e0af68)](#known-gaps)
 
 <img src="docs/demo.svg" alt="agentjit: compile a requirement, call it, list the registry" width="100%">
@@ -92,11 +94,18 @@ regeneration of everything you have.
 ## Quickstart
 
 ```bash
+pip install agent-jit        # the import name and the CLI are `agentjit`
+agentjit selftest            # 6 corpus cases, each with a deliberately planted bug
+```
+
+`selftest` ships with the package and spends nothing. It is worth running on a new
+machine: how the sandbox contains a memory bomb is platform-dependent, so "does this
+behave here?" is a real question. To work on `agentjit` itself:
+
+```bash
 git clone https://github.com/Birfy/agentjit && cd agentjit
 pip install -e ".[dev]"
-
-pytest              # 102 unit tests — no network, no tokens
-agentjit selftest   # 6 corpus cases, each with a deliberately planted bug
+pytest                       # 102 unit tests — no network, no tokens
 ```
 
 Synthesis needs a model. If you have [Claude Code](https://claude.ai/code) installed,
@@ -122,7 +131,8 @@ The examples are the spec, not decoration — nothing without them reaches the c
 }
 ```
 
-That is [`examples/rank.json`](examples/rank.json), so this runs as it stands:
+That is [`examples/rank.json`](examples/rank.json) — from a checkout, this runs as it
+stands:
 
 ```bash
 agentjit compile examples/rank.json --name rank   # write the cases, then the code
@@ -383,8 +393,9 @@ src/agentjit/
   lookup.py         three-level lookup — retrieval narrows, re-verification decides
   runtime.py        calling: input guard → sandbox → return guard. A pure read
   llm.py            backends: the API, the local claude CLI, a scripted replay
+  corpus/           6 corpus cases, one per gate — shipped, so selftest runs anywhere
 tools/              the three audits, plus the demo capture and the SVG builder
-tests/corpus/       6 corpus cases, one per gate
+tests/              unit tests; every one runs with no network and no tokens
 ```
 
 | Document | Contents |
@@ -393,6 +404,7 @@ tests/corpus/       6 corpus cases, one per gate
 | [docs/correctness.md](docs/correctness.md) | correctness and testing — **what decides whether this stands up** |
 | [docs/tracing-frontend.md](docs/tracing-frontend.md) | the front end that spots repetition and triggers a compile (not started) |
 | [NEXT.md](NEXT.md) | what to do next, and what is deliberately not being done |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | how to run things, and what a new verification gate has to prove |
 
 **Where to start reading:** the headers of `propose.py` (why one model judging itself is
 circular, and which part of that cannot be fixed), `verify.py` (which five gates were cut

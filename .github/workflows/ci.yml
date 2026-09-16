@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: pip install -e ".[dev]"
+
+      # Neither of these touches the network or spends a token: the synthesis loop is
+      # driven by a scripted client, and the corpus cases carry their implementations.
+      - name: Unit tests
+        run: pytest -q
+
+      # The corpus is the one that would notice a gate going quiet: each case carries a
+      # deliberately planted bug and names which gate has to catch it. A gate that stops
+      # firing, or starts firing on the correct implementation, fails here.
+      - name: Corpus selftest
+        run: agentjit selftest
+
+      # audit_traps reads the committed audit_result.json, so it needs no model. It is
+      # the check that the recorded audit still says what the README claims it says.
+      - name: Audit traps (against the committed audit results)
+        run: python tools/audit_traps.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # Catches the metadata problems that only surface at upload time — a malformed
+      # README, a missing license, a bad classifier — rather than at `twine upload`.
+      - name: Check the built metadata
+        run: twine check --strict dist/*
+
+      # A wheel that imports but whose console script is broken is a bad release, and
+      # nothing above would notice: the tests all run against the source tree.
+      - name: Install the wheel and run it
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install --quiet dist/*.whl
+          /tmp/wheeltest/bin/agentjit --help
+          /tmp/wheeltest/bin/agentjit selftest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
