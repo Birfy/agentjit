@@ -79,12 +79,14 @@ def cmd_compile(args) -> int:
 
     print(f"需求: {meta['requirement'][:90]}")
     print(f"例子: {len(examples)} 个（边界 {sum(e.boundary for e in examples)} 个）　"
-          f"模型: {args.model}　cache: {args.cache}\n")
+          f"模型: {args.model}　后端: {args.via}　cache: {args.cache}\n")
 
     try:
-        r = compile_function(meta["requirement"], examples, client=_LazyClient(args.model),
+        r = compile_function(meta["requirement"], examples,
+                             client=_generator(args.via, args.model),
                              registry=Registry(args.home), cache=args.cache,
-                             model=args.model, max_attempts=args.attempts)
+                             model=args.model, name=args.name or meta.get("name", ""),
+                             max_attempts=args.attempts)
     except NoCredentials as e:
         print(e, file=sys.stderr)
         return 2
@@ -102,6 +104,14 @@ def cmd_compile(args) -> int:
 
 class NoCredentials(RuntimeError):
     pass
+
+
+def _generator(via: str, model: str):
+    """挑一个生成后端。合成方式是可替换的，换的就是这一个对象。"""
+    if via == "cli":
+        from .llm import ClaudeCliClient
+        return ClaudeCliClient(model=model)
+    return _LazyClient(model)
 
 
 class _LazyClient:
@@ -148,7 +158,7 @@ def cmd_search(args) -> int:
         print("registry 是空的")
         return 0
     for c in hits:
-        print(f"{c.similarity:.2f}  {c.fn.handle}@{c.version.name}  "
+        print(f"{c.similarity:.2f}  {c.fn.ref}@{c.version.name}  "
               f"{c.version.level.value:<10}{c.fn.requirement[:56]}")
     print("\n相似度只用来缩小候选集。「求和」和「求平均」在字面上非常近 —— "
           "真正的判定要拿你的例子跑一遍复验（compile 会做）。")
@@ -173,11 +183,13 @@ def cmd_adopt(args) -> int:
         return 1
     try:
         fn = Registry(args.home).put(case.spec.intent, case.spec, case.source,
-                                     report, case.examples, model="human")
+                                     report, case.examples, model="human",
+                                     name=args.name or "")
     except NotCacheable as e:
         print(f"\n未入库：{e}")
         return 1
-    print(f"\nhandle: {fn.handle}　（{fn.versions[-1].name}，合成成本 0 —— 人写的）")
+    print(f"\n{'名字: ' + fn.name + '　' if fn.name else ''}handle: {fn.handle}"
+          f"　（{fn.versions[-1].name}，合成成本 0 —— 人写的）")
     return 0
 
 
@@ -191,15 +203,15 @@ def cmd_list(args) -> int:
         print(f"registry 是空的（{rt.reg.root}）")
         return 0
 
-    print(f"{'handle':<18}{'等级':<12}{'版本':<7}{'调用':>7}{'用例':>6}{'探针':>6}"
+    print(f"{'名字/handle':<20}{'等级':<12}{'版本':<7}{'调用':>7}{'用例':>6}{'探针':>6}"
           f"{'net_savings':>14}   需求")
     for fn in fns:
         v = fn.best()
         led = rt.ledger(fn)
         level = v.level.value if v else "QUARANTINED"
-        print(f"{fn.handle:<18}{level:<12}{(v.name if v else '-'):<7}"
+        print(f"{fn.ref:<20}{level:<12}{(v.name if v else '-'):<7}"
               f"{led.calls:>7}{len(fn.tests.examples):>6}{len(fn.tests.probes):>6}"
-              f"{led.net_savings:>14,.0f}   {fn.requirement[:44]}")
+              f"{led.net_savings:>14,.0f}   {fn.requirement[:40]}")
     return 0
 
 
@@ -213,7 +225,7 @@ def cmd_inspect(args) -> int:
         print(f"没有这个函数: {args.handle}", file=sys.stderr)
         return 1
 
-    print(f"== {fn.handle} ==")
+    print(f"== {fn.ref} ==" + (f"　（{fn.handle}）" if fn.name else ""))
     print(f"需求: {fn.requirement}")
     print(f"入口: {fn.spec.entry}(params, ctx)　超时 {fn.spec.timeout_ms}ms　"
           f"内存 {fn.spec.mem_mb}MB　建于 {fn.created_at}")
@@ -251,6 +263,19 @@ def cmd_inspect(args) -> int:
     if args.code and best:
         print(f"\n-- {best.name} 代码 --")
         print(best.code)
+    return 0
+
+
+def cmd_get(args) -> int:
+    """按名字（或 handle）把代码打出来。这就是"查询对应名字的代码"。"""
+    from .jit import get_code
+    from .registry import Registry
+
+    code = get_code(args.name, registry=Registry(args.home))
+    if not code:
+        print(f"没有叫 {args.name!r} 的函数（试试 agentjit list）", file=sys.stderr)
+        return 1
+    print(code, end="" if code.endswith("\n") else "\n")
     return 0
 
 
@@ -366,7 +391,14 @@ def main(argv=None) -> int:
     c.add_argument("-o", "--out", default=None, help="成功时把代码写到这里")
     c.add_argument("--cache", choices=["auto", "force_new", "ephemeral"], default="auto",
                    help="auto=先查后合成；force_new=强制合成新版本；ephemeral=合成一次不落盘")
+    c.add_argument("--name", default=None, help="给它起个名字，之后 agentjit get <名字>")
+    c.add_argument("--via", choices=["api", "cli"], default="cli",
+                   help="生成后端：cli=走本机 claude（不要 API key）；api=直连 Anthropic")
     c.set_defaults(fn=cmd_compile)
+
+    g = sub.add_parser("get", help="按名字把代码打出来")
+    g.add_argument("name")
+    g.set_defaults(fn=cmd_get)
 
     se = sub.add_parser("search", help="写需求前先看看有没有现成的")
     se.add_argument("query")
@@ -375,6 +407,7 @@ def main(argv=None) -> int:
 
     a = sub.add_parser("adopt", help="把一份人写的实现验一遍再入库，不花 token")
     a.add_argument("case", help="语料目录，含 case.json")
+    a.add_argument("--name", default=None, help="给它起个名字")
     a.set_defaults(fn=cmd_adopt)
 
     ls = sub.add_parser("list", help="registry 里有什么")

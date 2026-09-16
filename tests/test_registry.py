@@ -172,3 +172,51 @@ def test_probe_kinds_have_separate_budgets():
     ts.add_probe(Probe({"real": 1}, "runtime_error", "炸了"))
     assert any(p.kind == "runtime_error" for p in ts.probes), \
         "调用方的脏输入再多，也不该把真正的线上事故挤出去"
+
+
+# --- 名字 ------------------------------------------------------------------
+def test_get_by_name(reg):
+    """handle 是给机器用的，名字是给人用的。这东西的用法就是
+    "上次那个排名次的函数叫什么来着"。"""
+    from agentjit.jit import get_code
+
+    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="group_sum")
+    assert reg.get("group_sum").spec_hash == fn.spec_hash
+    assert reg.get(fn.handle).name == "group_sum"
+    assert get_code("group_sum", registry=reg).strip() == CODE.strip()
+    assert reg.get("没这个名字") is None
+
+
+def test_a_name_points_at_exactly_one_function(reg):
+    """一个名字指向两个函数就等于没索引。宁可在这里报错，
+    也不要让 get("rank") 的结果取决于目录遍历顺序。"""
+    from agentjit.registry import NameTaken
+
+    reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="rank")
+    other = Spec(intent="别的", param_schema={"type": "object"},
+                 return_schema={"type": "object"})
+    with pytest.raises(NameTaken):
+        reg.put("完全不同的需求", other, CODE, report(), EXAMPLES, name="rank")
+
+
+def test_renaming_and_later_versions_keep_one_name(reg):
+    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="old")
+    reg.put(REQ, SPEC, CODE + "# v2\n", report(), [], name="new")
+
+    back = reg.get(fn.handle)
+    assert back.name == "new" and len(back.versions) == 2
+    assert reg.get("new") is not None
+
+
+def test_a_function_without_a_name_falls_back_to_its_handle(reg):
+    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES)
+    assert fn.ref == fn.handle
+
+
+def test_quarantined_code_never_comes_out_of_get_code(reg):
+    """get_code 取的是 best()。被隔离的版本不该从这个口子流出去。"""
+    from agentjit.jit import get_code
+
+    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="doomed")
+    reg.quarantine(fn, fn.best(), "挂太多次")
+    assert get_code("doomed", registry=reg) == ""

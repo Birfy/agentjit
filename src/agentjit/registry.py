@@ -71,8 +71,18 @@ def spec_hash(requirement: str, spec: Spec) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
+def split_ref(ref: str) -> tuple[str, str | None]:
+    """把 `<名字或 handle>[@版本]` 拆开。
+
+    名字和 handle 走同一条路 —— 调用方不该为了指定版本先判断自己拿的是哪种。
+    `rank@v2` / `fn_7a3c9e@v2` / `rank` / `fn_7a3c9e` 都行。
+    """
+    base, _, ver = ref.strip().partition("@")
+    return base.strip(), (ver.strip() or None)
+
+
 def parse_handle(handle: str) -> tuple[str, str | None]:
-    """`fn_7a3c9e` → (hash, None)；`fn_7a3c9e@v2` → (hash, 'v2')。"""
+    """`fn_7a3c9e` → (hash, None)；`fn_7a3c9e@v2` → (hash, 'v2')。名字不走这里。"""
     m = HANDLE_RE.match(handle.strip())
     if not m:
         raise ValueError(f"handle 格式不对: {handle!r}（应形如 fn_7a3c9e 或 fn_7a3c9e@v2）")
@@ -246,10 +256,18 @@ class Function:
     tests: TestSet
     versions: list[Version] = field(default_factory=list)
     created_at: str = ""
+    # 人起的名字。`fn_a84dbc11d69f` 机器好用，人记不住 —— 而这东西的用法就是
+    # "上次那个排名次的函数叫什么来着"。没起名字就只能靠 handle。
+    name: str = ""
 
     @property
     def handle(self) -> str:
         return f"fn_{self.spec_hash}"
+
+    @property
+    def ref(self) -> str:
+        """指代它的最短方式。有名字用名字。"""
+        return self.name or self.handle
 
     @property
     def quarantined(self) -> bool:
@@ -273,7 +291,8 @@ class Function:
                                         v.n))
 
     def spec_meta(self) -> dict[str, Any]:
-        return {"spec_hash": self.spec_hash, "requirement": self.requirement,
+        return {"spec_hash": self.spec_hash, "name": self.name,
+                "requirement": self.requirement,
                 "spec": self.spec.to_dict(), "created_at": self.created_at}
 
 
@@ -302,6 +321,10 @@ class NotCacheable(ValueError):
     pass
 
 
+class NameTaken(ValueError):
+    pass
+
+
 class Registry:
     def __init__(self, root: Path | None = None):
         self.root = Path(root) if root else home() / "registry"
@@ -310,8 +333,19 @@ class Registry:
     def dir_of(self, spec_hash: str) -> Path:
         return self.root / spec_hash
 
-    def get(self, handle: str) -> Function | None:
-        h, _ = parse_handle(handle)
+    def get(self, ref: str) -> Function | None:
+        """按**名字**或 handle 取一个函数。
+
+        名字优先 —— 人给的名字不会长得像 `fn_a84dbc11`，撞不上；真撞上了说明
+        用户就是想按那个名字找。
+        """
+        base, _ = split_ref(ref)
+        if (fn := self.by_name(base)) is not None:
+            return fn
+        try:
+            h, _ = parse_handle(base)
+        except ValueError:
+            return None
         d = self.dir_of(h)
         if not (d / "spec.json").exists():
             # 允许用前缀找：handle 在终端里被截断是常事
@@ -320,6 +354,15 @@ class Registry:
                 return None
             d = matches[0]
         return self._load(d)
+
+    def by_name(self, name: str) -> Function | None:
+        if not name:
+            return None
+        for d in self._dirs():
+            meta = json.loads((d / "spec.json").read_text())
+            if meta.get("name") == name:
+                return self._load(d)
+        return None
 
     def all(self) -> list[Function]:
         fns = [self._load(d) for d in self._dirs()]
@@ -355,7 +398,8 @@ class Registry:
             ))
         return Function(spec_hash=meta["spec_hash"], requirement=meta["requirement"],
                         spec=Spec.from_dict(meta["spec"]), tests=tests,
-                        versions=versions, created_at=meta.get("created_at", ""))
+                        versions=versions, created_at=meta.get("created_at", ""),
+                        name=meta.get("name", ""))
 
     # --- 写 ----------------------------------------------------------------
     def put(
@@ -370,6 +414,7 @@ class Registry:
         attempts: int = 1,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        name: str = "",
     ) -> Function:
         """把一次成功的合成落盘。已有同 spec 时追加一个新版本。"""
         if report.level not in CACHEABLE:
@@ -378,11 +423,20 @@ class Registry:
                 "就是把一个没人验过的东西摆上货架（design.md §8.1）")
 
         h = spec_hash(requirement, spec)
+        if name and (other := self.by_name(name)) is not None and other.spec_hash != h:
+            # 名字是给人用的索引，一个名字指向两个函数就等于没索引。
+            # 宁可在这里报错，也不要让 get("rank") 的结果取决于目录遍历顺序。
+            raise NameTaken(f"名字 {name!r} 已经被 {other.handle} 占了"
+                            f"（{other.requirement[:40]}）—— 换一个，或者不起名字")
+
         fn = self._load(self.dir_of(h)) if (self.dir_of(h) / "spec.json").exists() else None
         if fn is None:
             fn = Function(spec_hash=h, requirement=requirement, spec=spec,
-                          tests=TestSet(), created_at=_now())
-            _dump(self.dir_of(h) / "spec.json", fn.spec_meta())
+                          tests=TestSet(), created_at=_now(), name=name)
+            self.save_spec(fn)
+        elif name and fn.name != name:
+            fn.name = name                       # 补个名字，或者改名
+            self.save_spec(fn)
 
         for ex in examples:
             fn.tests.add_example(ex)
@@ -398,6 +452,9 @@ class Registry:
         fn.versions.append(v)
         self.save_version(fn, v)
         return fn
+
+    def save_spec(self, fn: Function) -> None:
+        _dump(self.dir_of(fn.spec_hash) / "spec.json", fn.spec_meta())
 
     def save_tests(self, fn: Function) -> None:
         _dump(self.dir_of(fn.spec_hash) / "tests.json", fn.tests.to_dict())

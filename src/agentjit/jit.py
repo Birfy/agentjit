@@ -1,9 +1,19 @@
 """[design.md §4](../../docs/design.md#4-接口设计) 的四个操作。其余都是实现细节。
 
-    compile_function(requirement, examples) → handle
-    call_function(handle, args)             → result
-    search_functions(query)                 → [handle...]
-    inspect_function(handle)                → 源码 / 统计 / 验证报告
+说到底就三件事：**一段话进去，长出代码，之后按名字拿回来。**
+
+    compile_function("按 score 排名次…", examples, name="rank")  → 入库
+    get_code("rank")                                            → 源码
+    call_function("rank", {"records": [...]})                   → 结果
+
+外加两个辅助：`search_functions(query)` 找现成的，`inspect_function(name)` 看细节。
+
+**生成方式是可替换的。** `compile_function` 只要一个满足 `LLMClient` 协议的对象
+（`complete(system=, user=) -> LLMResponse`），换后端就是换这一个参数：
+
+    AnthropicClient()    直连 API，要 ANTHROPIC_API_KEY
+    ClaudeCliClient()    走本机 claude CLI，不要 key，用 Claude Code 的授权
+    ScriptedClient([…])  回放预设答案，测试用，不打网络
 
 这一层不干活，只负责把查找、合成、落盘按正确的顺序串起来。真正的逻辑在
 `lookup.py`（查）、`synth.py`（合成）、`registry.py`（存）、`runtime.py`（调）。
@@ -35,6 +45,7 @@ class CompileResult:
     cache: str                        # hit | miss | reused_with_new_version
     spec: Spec
     handle: str = ""
+    name: str = ""
     version: str = ""
     level: Level | None = None
     report: Report | None = None
@@ -62,7 +73,8 @@ class CompileResult:
                "reused_with_new_version": "需求还是那句，但本次的例子和旧版本对不上 —— 新增了一个版本"}
         lines.append(f"\ncache: {self.cache}　{tag.get(self.cache, '')}")
         if self.handle:
-            lines.append(f"handle: {self.handle}　{self.version}　"
+            who = f"名字: {self.name}　handle: {self.handle}" if self.name else f"handle: {self.handle}"
+            lines.append(f"{who}　{self.version}　"
                          f"等级 {self.level.value if self.level else '-'}")
         if self.reason:
             lines.append(self.reason)
@@ -81,6 +93,7 @@ def compile_function(
     thresholds: Thresholds | None = None,
     cache: str = "auto",              # auto | force_new | ephemeral
     model: str = "",
+    name: str = "",                   # 人起的名字，之后靠它取代码
     entry: str = "solve",
     **synth_kw: Any,
 ) -> CompileResult:
@@ -99,8 +112,9 @@ def compile_function(
     if cache == "auto":
         lk = find(reg, requirement, spec, examples, sandbox=sb)
         if lk.hit:
-            _bank_the_hit(reg, lk, examples)
+            _bank_the_hit(reg, lk, examples, name)
             return CompileResult(status="ready", cache="hit", spec=lk.fn.spec,
+                                 name=lk.fn.name,
                                  handle=lk.fn.handle, version=lk.version.name,
                                  level=lk.version.level, report=lk.version.report,
                                  lookup=lk)
@@ -130,18 +144,19 @@ def compile_function(
     try:
         fn = reg.put(requirement, r.spec, r.code, r.report, examples, model=model,
                      attempts=len(r.attempts), input_tokens=r.input_tokens,
-                     output_tokens=r.output_tokens)
+                     output_tokens=r.output_tokens, name=name)
     except NotCacheable as e:
         return CompileResult(status="ready", cache=state, spec=r.spec, synth=r,
                              lookup=lk, level=r.report.level, report=r.report,
                              reason=f"未入库：{e}", review=r.review)
 
     return CompileResult(status="ready", cache=state, spec=r.spec, synth=r, lookup=lk,
-                         handle=fn.handle, version=fn.versions[-1].name,
+                         name=fn.name, handle=fn.handle, version=fn.versions[-1].name,
                          level=r.report.level, report=r.report, review=r.review)
 
 
-def _bank_the_hit(reg: Registry, lk: Lookup, examples: list[Example]) -> None:
+def _bank_the_hit(reg: Registry, lk: Lookup, examples: list[Example],
+                  name: str = "") -> None:
     """命中之后要记的两笔账。
 
     1. `reverify_passes += 1` —— 这个版本又一次用别人的标准验过了。
@@ -152,11 +167,24 @@ def _bank_the_hit(reg: Registry, lk: Lookup, examples: list[Example]) -> None:
     """
     v = lk.version
     v.stats.reverify_passes += 1
+    if name and lk.fn.name != name:
+        lk.fn.name = name              # 命中了别人建的函数，顺手把名字贴上
+        reg.save_spec(lk.fn)
     for ex in examples:
         lk.fn.tests.add_example(Example(ex.input, ex.output, note=ex.note,
                                         boundary=ex.boundary, origin="reverify"))
     reg.save_tests(lk.fn)
     reg.save_version(lk.fn, v)
+
+
+def get_code(name: str, *, registry: Registry | None = None) -> str:
+    """按名字（或 handle）取代码。取不到返回空串。
+
+    取的是 `best()` 那个版本 —— 被隔离的版本不会从这里出去。
+    """
+    fn = (registry or Registry()).get(name)
+    v = fn.best() if fn else None
+    return v.code if v else ""
 
 
 def call_function(handle: str, args: dict[str, Any], *,

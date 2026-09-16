@@ -93,6 +93,84 @@ class AnthropicClient:
         )
 
 
+# claude CLI 每次调用都会带上它自己的系统提示和工具定义，和 prompt 内容无关。
+# 实测（拿一个"复读一句话"的空任务量的）约 22.2k input token。拿 CLI 量出来的数
+# 去算 net_savings 必须把它减掉，否则合成成本虚高一个数量级 —— 那是 Claude Code
+# 的开销，不是 agentjit 的。
+CLI_OVERHEAD_TOKENS = 22_200
+
+
+@dataclass
+class ClaudeCliClient:
+    """走本机的 `claude -p`（headless），不需要 API key。
+
+    用的是 Claude Code 自己的授权，所以装了 Claude Code 的机器就能合成 ——
+    这是没有 API 凭据时唯一能跑通 NEXT.md 第 0 项的路。
+
+    **量出来的数要打个折扣**，两处：
+
+    - `input_tokens` 扣掉了 `overhead_tokens` 的固定开销（见上）。扣完仍然是估的，
+      因为 CLI 的系统提示会随版本变。`raw_input_tokens` 留着原始数好对账。
+    - 这条路上 `max_tokens` 和 thinking 预算都由 CLI 决定，`llm.py` 的模型能力表
+      在这里不起作用。所以它测得出"Haiku 几次能修对"，测不出"直连 API 要花多少钱"。
+    """
+
+    model: str = "haiku"
+    timeout_s: int = 300
+    overhead_tokens: int = CLI_OVERHEAD_TOKENS
+    binary: str = "claude"
+    raw_input_tokens: int = 0
+    calls: int = 0
+
+    def _argv(self, system: str) -> list[str]:
+        return [
+            self.binary, "-p", "--model", self.model,
+            # 换掉 Claude Code 自己的系统提示，只留 agentjit 的 —— 不换的话
+            # 模型会同时收到两套互相打架的指令
+            "--system-prompt", system,
+            "--exclude-dynamic-system-prompt-sections",
+            "--no-session-persistence",
+            "--output-format", "json",
+        ]
+
+    def complete(self, *, system: str, user: str, max_tokens: int = 16000) -> LLMResponse:
+        import json as _json
+        import subprocess
+
+        self.calls += 1
+        try:
+            p = subprocess.run(self._argv(system), input=user, capture_output=True,
+                               text=True, timeout=self.timeout_s)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"claude CLI 超时（{self.timeout_s}s）") from e
+        if p.returncode != 0:
+            raise RuntimeError(f"claude CLI 退出码 {p.returncode}：{p.stderr[-800:]}")
+
+        try:
+            d = _json.loads(p.stdout)
+        except _json.JSONDecodeError as e:
+            raise RuntimeError(f"claude CLI 的输出不是 JSON：{p.stdout[:400]!r}") from e
+
+        if d.get("is_error") or d.get("subtype") != "success":
+            msg = d.get("result") or d.get("api_error_status") or d.get("subtype")
+            # 拒答要如实报成拒答，不能当空回复重试 —— 重试只会再被拒一次
+            if "refus" in str(msg).lower():
+                raise Refused(str(msg))
+            raise RuntimeError(f"claude CLI 失败：{msg}")
+
+        u = d.get("usage") or {}
+        raw_in = (u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0)
+                  + u.get("cache_read_input_tokens", 0))
+        self.raw_input_tokens += raw_in
+        return LLMResponse(
+            text=d.get("result") or "",
+            input_tokens=max(0, raw_in - self.overhead_tokens),
+            output_tokens=u.get("output_tokens", 0),
+            cache_read_tokens=u.get("cache_read_input_tokens", 0) or 0,
+            stop_reason=d.get("stop_reason") or "end_turn",
+        )
+
+
 @dataclass
 class ScriptedClient:
     """按顺序回放预设回复。用来确定性地测合成循环本身。"""

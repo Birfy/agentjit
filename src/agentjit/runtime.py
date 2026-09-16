@@ -36,7 +36,7 @@ import jsonschema
 from . import assertions
 from .econ import DEFAULT as DEFAULT_COST
 from .econ import CostModel, Ledger
-from .registry import Function, Probe, Registry, Version, parse_handle
+from .registry import Function, Probe, Registry, Version, split_ref
 from .sandbox import CallResult, RunResult, Sandbox
 
 # 连续多少次"算得到实现头上"的失败就隔离该版本。design.md §6.5。
@@ -115,15 +115,15 @@ class Runtime:
 
     def call_many(self, handle: str, args_list: list[dict[str, Any]]) -> list[CallOutcome]:
         fn = self.function(handle)
-        # `fn_7a3c9e@v2` 指名要哪个版本；不指名就按 best() 排序取最优。
+        # `rank@v2` / `fn_7a3c9e@v2` 指名要哪个版本；不指名就按 best() 取最优。
         # 指名一个被隔离的版本不给过 —— 隔离的意思就是别再用它了，
         # 写得出版本号也不构成例外。
-        _, want = parse_handle(handle)
+        _, want = split_ref(handle)
         v = fn.version(want) if want else fn.best()
         if v is None or not v.active:
             why = (v.quarantine_reason if v is not None else
                    next((x.quarantine_reason for x in fn.versions if x.quarantine_reason), ""))
-            what = f"{fn.handle}@{want}" if want else f"{fn.handle} 的所有版本"
+            what = f"{fn.ref}@{want}" if want else f"{fn.ref} 的所有版本"
             return [CallOutcome(False, kind="quarantined",
                                 message=f"{what}不可用。{why}")
                     for _ in args_list]

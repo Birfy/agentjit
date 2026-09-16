@@ -9,12 +9,13 @@ from .registry import Function, Registry, TestSet, Version
 from .runtime import CallOutcome, Runtime
 from .sandbox import Sandbox
 from .verify import Thresholds, verify
-from .jit import (CompileResult, call_function, compile_function,
+from .jit import (CompileResult, call_function, compile_function, get_code,
                   inspect_function, search_functions)
 
 __all__ = ["Example", "GateResult", "Level", "Report", "Spec",
            "Sandbox", "Thresholds", "verify",
            "CostModel", "Ledger", "Registry", "Function", "TestSet", "Version",
            "Runtime", "CallOutcome", "CompileResult",
-           # design.md §4 的四个操作
-           "compile_function", "call_function", "search_functions", "inspect_function"]
+           # 产品面：一段话进去 → 长出代码 → 按名字拿回来
+           "compile_function", "get_code", "call_function",
+           "search_functions", "inspect_function"]
