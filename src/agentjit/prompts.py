@@ -9,7 +9,8 @@ Two hard constraints:
    "branch coverage must be 100%" and "hundreds of inputs will be thrown at you" —
    those gates were deleted but the text stayed, i.e. we were scaring the model with
    rules that no longer existed. Now it is split in two: what actually fails you
-   (static check, your test cases), and what is merely hard-won advice.
+   (the static check, the test cases, the return schema — exactly the three gates
+   `verify.py` can reject on), and what is merely hard-won advice.
 """
 from __future__ import annotations
 
@@ -52,11 +53,14 @@ sandbox. Parse dates with `datetime.date.fromisoformat("2024-01-05")` or
 - Anything that looks like a key or token literal
 - `async` / `await`
 
-# Only two things can fail you
+# Only three things can fail you
 
 1. **The static check** (the bans above).
 2. **The test cases you were given**: feed the input in, the return value must match
    the expected output exactly.
+3. **return_schema**: the value you return is validated against it. It was inferred
+   from the examples' outputs, so matching the examples normally matches the schema —
+   returning a different shape on an input the examples do not cover is what trips it.
 
 # Some advice (won't fail you directly, but will probably fail you on a test case)
 

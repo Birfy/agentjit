@@ -14,6 +14,51 @@
 
 </div>
 
+<details>
+<summary>The same session as text (it is a real transcript — <code>tools/capture_demo.sh</code> produced it)</summary>
+
+```console
+$ agentjit compile examples/rank.json --name rank
+requirement  Rank {name, score} records from highest score to lowest. Records with the same…
+seeds        5   model claude-haiku-4-5   backend cli   cache auto
+miss: nothing reusable found
+  wrote 8 extra test cases
+    {"records": [{"name": "alice",…   (Three-way tie causes rank to skip from 1 to 4)
+    {"records": [{"name": "alice",…   (Negative scores ranked lower than zero)
+      ! assumes something the requirement did not say: Scores can be negative and follow st…
+    {"records": [{"name": "zoe", "…   (Names sorted alphabetically within same rank, regard…
+    {"records": [{"name": "alice",…   (Four-way tie causes rank to skip from 1 to 5)
+  attempt 1  passed
+
+  PASS  static                passed
+  PASS  examples.sufficiency  13 case(s)
+  PASS  examples              13/13 passed
+  PASS  return_schema         passed
+
+  level: VERIFIED   took: 47ms
+
+result: ok   tokens 3569in/2154out
+cache: miss   no hit; synthesised a new one
+name rank   handle fn_69889ea0d4c5   v1   level VERIFIED
+$ agentjit call rank '{"records":[{"name":"zoe","score":7},{"name":"amy","score":9}]}'
+ok    v1
+[
+  {
+    "name": "amy",
+    "rank": 1
+  },
+  {
+    "name": "zoe",
+    "rank": 2
+  }
+]
+$ agentjit list
+NAME              VER    CASES   REQUIREMENT
+rank              v1        13   Rank {name, score} records from highest score to lowest.
+```
+
+</details>
+
 An agent is good at working out *what* to do. It is expensive and unreliable at doing the
 same thing two hundred times. `agentjit` takes the repetitive part, compiles it into a
 real function once, verifies it, and stores it under a name you choose.
@@ -22,9 +67,12 @@ This is what a JIT does to an interpreter: a hot path should not be re-derived o
 pass. Compile it once, then just run it.
 
 ```
-first call    synthesise + verify   ~20-60s,  a few thousand tokens
-every call    sandboxed execution   ~30ms,    zero tokens
+first call    synthesise + verify   about a minute, a few thousand tokens
+every call    sandboxed execution   ~30ms,          zero tokens
 ```
+
+(Measured across the twelve compiles in the audit below: 56s to 195s each, every one
+through the local `claude` CLI, which carries its own overhead.)
 
 ---
 
@@ -405,7 +453,7 @@ src/agentjit/
   propose.py        get the model to write the cases out — before the code, separate call
   prompts.py        the two prompts; the requirement sits in an untrusted data region
   synth.py          the synthesis loop: write → verify → structured feedback → write again
-  verify.py         the static check plus running the cases. Those two, and no more
+  verify.py         the static check, the cases, the return schema. Those three, no more
   static_check.py   the AST allowlist — the cheapest gate; failing it means no sandbox
   sandbox.py        subprocess execution plus the parent-side memory watchdog
   _child.py         the sandbox child; must be self-contained
@@ -415,7 +463,12 @@ src/agentjit/
   runtime.py        calling: input guard → sandbox → return guard. A pure read
   llm.py            backends: the API, the local claude CLI, a scripted replay
 tests/corpus/       6 corpus cases, one per gate
-tools/              the two audits, plus the demo capture and the SVG builder
+tools/
+  audit_tests.py    are the generated expectations right? (the reference is the oracle)
+  audit_traps.py    did the generated cases go after the hard parts? (a predicate each)
+  audit_e2e.py      is the compiled function right, on 200 random inputs per requirement?
+  capture_demo.sh   run the CLI for real and capture the transcript
+  make_demo_svg.py  that transcript -> the animated SVG at the top of this file
 examples/           two demo requirements for `agentjit compile`
 ```
 
