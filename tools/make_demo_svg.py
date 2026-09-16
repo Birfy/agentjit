@@ -8,8 +8,18 @@ what the tool does; a hand-written one shows what someone hoped it would do. So 
 script takes a transcript file, and `tools/capture_demo.sh` is what produces that
 transcript by actually running the CLI.
 
-    tools/capture_demo.sh                       # runs the CLI, writes docs/demo.txt
-    python tools/make_demo_svg.py               # docs/demo.txt -> docs/demo.svg
+Three steps, and the middle one is a person's:
+
+    tools/capture_demo.sh              # runs the CLI, writes docs/demo.raw.txt
+    $EDITOR docs/demo.txt              # pick the lines, trim them to <= COLS columns
+    python tools/make_demo_svg.py      # docs/demo.txt -> docs/demo.svg
+
+The curation cannot be automated away, and pretending otherwise would just move the
+problem: a real compile prints lines 150 columns wide, and which of the eight generated
+cases are worth showing is a judgement call. Truncating mechanically would cut off the
+note at the end of each case line, which is the part that carries the meaning. So this
+script **refuses** anything too wide and names the offenders, rather than quietly
+producing a demo with text running off the edge.
 
 Transcript format: a line starting with `$ ` is a command (typed out character by
 character); everything else is output (revealed a line at a time). A line of `~~~` is a
@@ -201,10 +211,13 @@ def main(argv: list[str]) -> int:
     lines, total = schedule(parse(src.read_text()))
     over = [x["text"] for x in lines if len(x["text"]) > COLS]
     if over:
-        print(f"{len(over)} line(s) are wider than {COLS} columns and will overflow:",
-              file=sys.stderr)
+        print(f"{len(over)} line(s) are wider than {COLS} columns and would run off the "
+              f"edge:", file=sys.stderr)
         for line in over[:5]:
             print(f"  {len(line):3d}  {line[:70]}...", file=sys.stderr)
+        print(f"\nTrim them in {src}. On a generated-case line, shorten the input/output "
+              f"preview\nand keep the note in brackets — the note is the part that says "
+              f"what the case pins down.", file=sys.stderr)
         return 1
 
     dst.write_text(render(lines, total, "agentjit — text in, code out, fetch it by name"))
