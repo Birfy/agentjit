@@ -73,3 +73,21 @@ def check(source: str, entry: str = "solve") -> list[str]:
             v.append(f"{entry} 必须接受恰好两个参数 (params, ctx)，实际 {names}")
 
     return v
+
+
+# 正常的数据处理函数不该凭空长出一个外部端点。见 docs/design.md §7.4 ——
+# 即使注入成功让模型写出了可疑代码，这里也会把它挑出来给人看。
+_REVIEW_PATTERNS = (
+    (re.compile(r"https?://[^\s\"']+"), "硬编码 URL"),
+    (re.compile(r"[\"'](/(?:[\w.-]+/){1,}[\w.-]*)[\"']"), "硬编码绝对路径"),
+    (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "硬编码 IP"),
+)
+
+
+def review_flags(source: str) -> list[str]:
+    """不阻断，但要摆到人眼前的东西。"""
+    out = []
+    for pat, why in _REVIEW_PATTERNS:
+        for m in set(pat.findall(source)):
+            out.append(f"{why}: {m if isinstance(m, str) else m[0]}")
+    return out

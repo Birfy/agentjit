@@ -1,0 +1,78 @@
+{
+  "requirement": "把行按 type 分组，对 amount 求和，返回 {type: 总额}。amount 可能带货币符号和千分位逗号；空字符串或没有数字的按 0 算。",
+  "examples": [
+    {
+      "input": {
+        "rows": [
+          {
+            "type": "refund",
+            "amount": "$1,200.50"
+          },
+          {
+            "type": "sale",
+            "amount": "$300"
+          }
+        ]
+      },
+      "output": {
+        "refund": 1200.5,
+        "sale": 300.0
+      }
+    },
+    {
+      "input": {
+        "rows": []
+      },
+      "output": {},
+      "boundary": true,
+      "note": "空输入"
+    },
+    {
+      "input": {
+        "rows": [
+          {
+            "type": "sale",
+            "amount": ""
+          }
+        ]
+      },
+      "output": {
+        "sale": 0.0
+      },
+      "boundary": true,
+      "note": "空金额按 0"
+    },
+    {
+      "input": {
+        "rows": [
+          {
+            "type": "sale",
+            "amount": "$100"
+          },
+          {
+            "type": "sale",
+            "amount": "$50"
+          }
+        ]
+      },
+      "output": {
+        "sale": 150.0
+      }
+    },
+    {
+      "input": {
+        "rows": [
+          {
+            "type": "fee",
+            "amount": "-$25.50"
+          }
+        ]
+      },
+      "output": {
+        "fee": -25.5
+      },
+      "boundary": true,
+      "note": "负数"
+    }
+  ]
+}

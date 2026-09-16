@@ -5,7 +5,10 @@ import json
 import sys
 from pathlib import Path
 
+import json as _json
+
 from .cases import Case, load_all
+from .types import Example
 from .verify import Thresholds, verify
 
 CORPUS = Path(__file__).resolve().parents[2] / "tests" / "corpus"
@@ -66,6 +69,29 @@ def cmd_selftest(args) -> int:
     return 1 if bad else 0
 
 
+def cmd_compile(args) -> int:
+    """从需求 + 例子合成一个函数，全程走完整验证。要花 token。"""
+    from .llm import DEFAULT_MODEL, AnthropicClient
+    from .synth import compile_function
+
+    meta = _json.loads(Path(args.requirement).read_text())
+    examples = [Example(**e) for e in meta["examples"]]
+    client = AnthropicClient(model=args.model)
+
+    print(f"需求: {meta['requirement'][:90]}")
+    print(f"例子: {len(examples)} 个（边界 {sum(e.boundary for e in examples)} 个）　模型: {args.model}\n")
+
+    r = compile_function(meta["requirement"], examples, client=client,
+                         max_attempts=args.attempts)
+    print(r.render())
+    if r.ok and args.out:
+        Path(args.out).write_text(r.code + "\n")
+        print(f"\n已写入 {args.out}")
+    elif r.ok and not args.out:
+        print("\n" + r.code)
+    return 0 if r.ok else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="agentjit", description="agent-jit 验证管线")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -79,7 +105,17 @@ def main(argv=None) -> int:
     s.add_argument("--corpus", default=None)
     s.set_defaults(fn=cmd_selftest)
 
+    c = sub.add_parser("compile", help="从需求 + 例子合成一个函数（会调用 LLM）")
+    c.add_argument("requirement", help="JSON 文件：{requirement, examples[]}")
+    c.add_argument("--model", default=None)
+    c.add_argument("--attempts", type=int, default=3)
+    c.add_argument("-o", "--out", default=None, help="成功时把代码写到这里")
+    c.set_defaults(fn=cmd_compile)
+
     args = p.parse_args(argv)
+    if getattr(args, "model", "sentinel") is None:
+        from .llm import DEFAULT_MODEL
+        args.model = DEFAULT_MODEL
     return args.fn(args)
 
 

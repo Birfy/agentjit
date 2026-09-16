@@ -36,6 +36,10 @@ class Thresholds:
     # 第一道阻断关卡挂掉就停。后面的关卡在一份已知是错的代码上跑不出有用信息，
     # 而合成的修复循环本来也只看第一个失败。
     fail_fast: bool = True
+    # 修复循环里把这两道关掉：保留集必须对循环不可见（否则防过拟合就白做了），
+    # 变异得分衡量的是"测试集强不强"，不是代码问题，反馈给模型只会让它扭曲代码去迎合弱用例。
+    run_holdout: bool = True
+    run_mutation: bool = True
 
 
 @dataclass
@@ -83,7 +87,16 @@ def verify(
     *,
     thresholds: Thresholds | None = None,
     sandbox: Sandbox | None = None,
+    coverage_inputs: list[dict[str, Any]] | None = None,
 ) -> Report:
+    """coverage_inputs：只参与覆盖率统计、不参与对错判定的额外输入。
+
+    修复循环需要它。循环只能看见可见用例，但"这段代码有没有被验证过"问的是
+    **整个测试集**——正确实现的某个分支很可能只有保留集那条用例能走到。拿可见
+    用例量覆盖率，会逼着模型删掉必要的代码，删了再被保留集判死。
+    覆盖率只需要输入，不需要期望输出，所以这里用全部输入量、只用可见用例判对错，
+    反馈里也只说"第几行没覆盖"—— 保留集的输入和答案都不会泄漏给模型。
+    """
     th = thresholds or Thresholds()
     c = _Ctx(source, spec, examples, th, sandbox or Sandbox())
     t0 = time.perf_counter()
@@ -111,13 +124,15 @@ def verify(
           {"n": n, "has_boundary": has_boundary}, blocking=False)
 
     try:
-        visible, held = split(examples, th.holdout_ratio, th.holdout_seed) if sufficient else (examples, [])
+        visible, held = (split(examples, th.holdout_ratio, th.holdout_seed)
+                         if sufficient and th.run_holdout else (examples, []))
     except NotEnoughExamples:
         visible, held = examples, []
 
     # ---- 跑例子（顺带量覆盖率）--------------------------------------------
     ordered = visible + held
-    run = c.sb.run(source, spec.entry, [e.input for e in ordered],
+    run = c.sb.run(source, spec.entry,
+                   [e.input for e in ordered] + list(coverage_inputs or []),
                    coverage=True, timeout_ms=spec.timeout_ms, mem_mb=spec.mem_mb)
 
     if why := run.why_dead:
@@ -136,7 +151,9 @@ def verify(
               + ("　← 可见用例过了但保留集没过，典型的过拟合" if bad_h else ""),
               {"failures": bad_h})
     else:
-        c.add("examples.holdout", True, "跳过：用例不足，分不出保留集", blocking=False)
+        c.add("examples.holdout", True,
+              "跳过：修复循环内不分保留集" if not th.run_holdout else "跳过：用例不足，分不出保留集",
+              blocking=False)
 
     if (bail := _bail(c, t0)):
         return bail
@@ -212,6 +229,10 @@ def verify(
         return bail
 
     # ---- 变异测试 ----------------------------------------------------------
+    if not th.run_mutation:
+        c.add("mutation", True, "跳过：修复循环内不跑变异测试", blocking=False)
+        return _finish(c, Level.VERIFIED if sufficient else Level.EPHEMERAL, t0)
+
     mutants = mutate.generate(source, th.mutation_limit)
     if not mutants:
         c.add("mutation", False, "生成不出有效变异体（代码太简单？）", blocking=False)
