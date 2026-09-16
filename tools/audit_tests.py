@@ -42,6 +42,7 @@ class Task:
     seeds: list[tuple[dict, Any]]
     reference: Callable[[dict], Any]
     shape: str = ""                                 # 这个需求属于哪一类形态
+    sample: Callable[[Any], dict] | None = None     # 随机造一个合法输入，端到端用
     notes: list[str] = field(default_factory=list)
 
     def examples(self) -> list[Example]:
@@ -54,6 +55,15 @@ TASKS: list[Task] = []
 def task(**kw):
     def deco(fn):
         TASKS.append(Task(reference=fn, **kw))
+        return fn
+    return deco
+
+
+def sampler(key):
+    """给某个需求挂一个随机输入生成器。端到端那一步要用它造 200 个输入，
+    拿参考实现当标准答案去对编译出来的代码。"""
+    def deco(fn):
+        next(t for t in TASKS if t.key == key).sample = fn
         return fn
     return deco
 
@@ -221,6 +231,74 @@ def _split(p):
     for i in range(rest):
         base[order[i % len(order)]] += 1
     return base
+
+
+# --- 随机输入生成器（端到端用）----------------------------------------------
+_WORDS = ["alice", "bob", "carol", "dave", "eve", "a", "zz", "m1", "X", "svc"]
+
+
+@sampler("logs")
+def _s_logs(rng):
+    lines = []
+    for _ in range(rng.randrange(0, 6)):
+        if rng.random() < 0.2:
+            lines.append(rng.choice(["", "   ", "\t"]))
+            continue
+        lvl = rng.choice(["DEBUG", "INFO", "WARN", "ERROR"])
+        msg = rng.choice(["ok", "failed [retry] later", "a b c", "]", "x]y]z", "  "])
+        pad = rng.choice(["", "  ", " "])
+        lines.append(f"{pad}2024-0{rng.randrange(1,10)}-1{rng.randrange(0,10)} "
+                     f"1{rng.randrange(0,10)}:0{rng.randrange(0,6)}:00 {lvl} "
+                     f"[{rng.choice(_WORDS)}] {msg}{pad}")
+    return {"lines": lines}
+
+
+@sampler("workdays")
+def _s_workdays(rng):
+    import datetime as d
+    a = d.date(2024, 1, 1) + d.timedelta(days=rng.randrange(0, 400))
+    b = a + d.timedelta(days=rng.randrange(-5, 40))
+    return {"start": a.isoformat(), "end": b.isoformat()}
+
+
+@sampler("flatten")
+def _s_flatten(rng):
+    def build(depth):
+        if depth <= 0:
+            return rng.choice([1, "x", None, True, [1, 2], []])
+        out = {}
+        for _ in range(rng.randrange(0, 4)):
+            k = rng.choice(["a", "b", "c", "k1"])
+            out[k] = build(depth - 1) if rng.random() < 0.5 else rng.choice(
+                [1, "s", [], {}, None])
+        return out
+    # 顶层必须是 dict —— 需求里 obj 就是个 dict，造出标量是生成器的 bug 不是实现的
+    top = build(rng.randrange(1, 4))
+    return {"obj": top if isinstance(top, dict) else {}}
+
+
+@sampler("topn")
+def _s_topn(rng):
+    return {"rows": [{"name": rng.choice(_WORDS) + str(i),
+                      "dept": rng.choice(["x", "y", "z"]),
+                      "salary": rng.choice([1, 5, 5, 10, 10, 20])}
+                     for i in range(rng.randrange(0, 9))]}
+
+
+@sampler("uptime")
+def _s_uptime(rng):
+    evs, ts = [], 0
+    for _ in range(rng.randrange(0, 9)):
+        ts += rng.randrange(0, 20)
+        evs.append({"ts": ts, "event": rng.choice(["start", "stop"])})
+    return {"events": evs}
+
+
+@sampler("split")
+def _s_split(rng):
+    n = rng.randrange(1, 5)
+    return {"total": rng.randrange(0, 1000),
+            "weights": [rng.choice([1, 1, 2, 3, 7]) for _ in range(n)]}
 
 
 # --- 跑 --------------------------------------------------------------------

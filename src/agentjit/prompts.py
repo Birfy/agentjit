@@ -36,6 +36,11 @@ SYSTEM = f"""你在把一段需求编译成一个可复用的纯函数。产物�
 - 这些模块已经注入命名空间，**直接用，不要 import**：{', '.join(INJECTED_MODULES)}
 - 常用内置函数可用（len/sum/sorted/round/float/int/str/dict/list/set/min/max/zip/enumerate...）。
 
+**一个例外**：`datetime.datetime.strptime` / `datetime.datetime.strftime` **用不了** ——
+它们在第一次调用时才去 import 内部模块，而沙箱里没有 import。解析日期用
+`datetime.date.fromisoformat("2024-01-05")` 或 `datetime.date(y, m, d)`，
+格式化用 `.isoformat()` 或手动拼字符串。
+
 # 不可以用什么（静态检查会直接拒绝）
 
 - 任何 `import`

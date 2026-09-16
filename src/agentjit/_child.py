@@ -61,6 +61,21 @@ def _apply_limits(mem_mb, cpu_s):
             pass  # 平台不支持就算了；超时由父进程的 kill 兜底
 
 
+# 【已知限制，别再试预热了】
+#
+# 有些标准库函数在第一次调用时才去 import 它的实现模块，在这里会炸成
+# `KeyError: '__import__'`。实测撞到的是 `datetime.datetime.strptime`
+# （内部要 `_strptime`）—— 模型写的逻辑完全正确，被这个挡下来，白烧一轮合成。
+#
+# **先把 `_strptime` import 进 sys.modules 是没用的**：strptime 是 C 实现，
+# 走 `PyImport_Import`，那个函数在**当前 globals 的 builtins** 里找 `__import__`，
+# 而我们给的是受限字典 —— 在查 sys.modules 之前就已经失败了。
+#
+# 要让它能用，只能往 SAFE_BUILTINS 里放一个（哪怕是受限的）`__import__`。
+# 那和 design.md §7.2"沙箱里一个洞都不开"直接冲突，不划算：省的只是一轮合成，
+# 赌的是整个沙箱边界。所以改成在 prompts.py 里**告诉模型别用它**。
+
+
 def _build_globals(code_path):
     real = __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
     safe = {n: real[n] for n in SAFE_BUILTINS if n in real}

@@ -105,3 +105,30 @@ def test_verify_short_circuits_on_static_failure():
     assert [g.name for g in r.gates] == ["static"]      # 没进沙箱
 
 
+
+
+# --- 沙箱的已知限制 --------------------------------------------------------
+def test_strptime_is_known_broken_and_the_prompt_says_so(sb):
+    """`datetime.datetime.strptime` 在沙箱里用不了：它第一次调用时才 import
+    `_strptime`，而受限 builtins 里没有 `__import__`。
+
+    这条是实测撞出来的 —— 模型写的日期逻辑完全正确，被它挡下来，白烧一轮合成
+    去改写。修沙箱要往 builtins 里放 `__import__`，和"沙箱里一个洞都不开"冲突，
+    所以改成在 prompt 里告诉模型别用。实测：合成从 2~3 次尝试降到 1 次。
+
+    这个测试钉的是**两件事必须同步**：限制还在，prompt 里就得写着。
+    哪天沙箱能跑 strptime 了，这条会红 —— 那时候把 prompt 里那段删掉。
+    """
+    from agentjit.prompts import SYSTEM
+
+    src = ('def solve(params, ctx):\n'
+           '    return {"v": datetime.datetime.strptime(params["s"], "%Y-%m-%d").year}\n')
+    r = sb.run(src, "solve", [{"s": "2024-01-05"}])
+    assert not r.results[0].ok and "__import__" in r.results[0].error
+    assert "strptime" in SYSTEM, "限制还在，prompt 里就必须写着"
+
+    # 推荐的替代写法必须真的能用，否则等于把模型指到另一个坑里
+    ok = sb.run('def solve(params, ctx):\n'
+                '    return {"v": datetime.date.fromisoformat(params["s"]).year}\n',
+                "solve", [{"s": "2024-01-05"}])
+    assert ok.results[0].value == {"v": 2024}

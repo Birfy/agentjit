@@ -1,0 +1,77 @@
+[
+  {
+    "key": "workdays",
+    "shape": "日期计算",
+    "seed": 0,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "通过"
+    ],
+    "summaries": [
+      "全部用例通过"
+    ],
+    "failed_code": [],
+    "secs": 80,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    start_str = params[\"start\"]\n    end_str = params[\"end\"]\n    \n    start_date = datetime.date.fromisoformat(start_str)\n    end_date = datetime.date.fromisoformat(end_str)\n    \n    if start_date > end_date:\n        return {\"days\": 0}\n    \n    count = 0\n    current_date = start_date\n    while current_date <= end_date:\n        if current_date.weekday() < 5:\n            count += 1\n        current_date += datetime.timedelta(days=1)\n    \n    return {\"days\": count}"
+  },
+  {
+    "key": "workdays",
+    "shape": "日期计算",
+    "seed": 1,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "通过"
+    ],
+    "summaries": [
+      "全部用例通过"
+    ],
+    "failed_code": [],
+    "secs": 82,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    start_str = params[\"start\"]\n    end_str = params[\"end\"]\n    \n    start_date = datetime.date.fromisoformat(start_str)\n    end_date = datetime.date.fromisoformat(end_str)\n    \n    if start_date > end_date:\n        return {\"days\": 0}\n    \n    count = 0\n    current = start_date\n    while current <= end_date:\n        # weekday(): 0=Monday, 6=Sunday\n        # 工作日是 0-4（周一到周五）\n        if current.weekday() < 5:\n            count += 1\n        current += datetime.timedelta(days=1)\n    \n    return {\"days\": count}"
+  },
+  {
+    "key": "workdays",
+    "shape": "日期计算",
+    "seed": 2,
+    "compiled": true,
+    "attempts": 1,
+    "generated": 8,
+    "assumed": 0,
+    "propose_error": "",
+    "propose_dropped": [],
+    "gates": [
+      "通过"
+    ],
+    "summaries": [
+      "全部用例通过"
+    ],
+    "failed_code": [],
+    "secs": 66,
+    "reason": "",
+    "agree": 200,
+    "n": 200,
+    "dead": "",
+    "diffs": [],
+    "code": "def solve(params, ctx):\n    start_str = params['start']\n    end_str = params['end']\n    \n    start_date = datetime.date.fromisoformat(start_str)\n    end_date = datetime.date.fromisoformat(end_str)\n    \n    if start_date > end_date:\n        return {\"days\": 0}\n    \n    count = 0\n    current = start_date\n    while current <= end_date:\n        if current.weekday() < 5:\n            count += 1\n        current += datetime.timedelta(days=1)\n    \n    return {\"days\": count}"
+  }
+]
