@@ -2,8 +2,7 @@
 # `agentjit` is taken on PyPI by a different, actively published project whose wheel
 # also installs a top-level `agentjit` package — so sharing the name would not just be
 # confusing, the two would silently overwrite each other in site-packages. Everything
-# here is `jitagent`: the distribution, the import name and the CLI. The GitHub
-# repository keeps its original name.
+# here is `jitagent`: the distribution, the import name, the CLI and the repository.
 name = "jitagent"
 version = "0.0.1"
 description = "Compile a plain-text requirement into a reusable, verified, sandboxed function"
@@ -31,10 +30,10 @@ dependencies = ["jsonschema>=4.21"]
 dev = ["pytest>=8", "build>=1.2", "twine>=5.1"]
 
 [project.urls]
-Homepage = "https://github.com/Birfy/agentjit"
-Repository = "https://github.com/Birfy/agentjit"
-Issues = "https://github.com/Birfy/agentjit/issues"
-Changelog = "https://github.com/Birfy/agentjit/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Birfy/jitagent"
+Repository = "https://github.com/Birfy/jitagent"
+Issues = "https://github.com/Birfy/jitagent/issues"
+Changelog = "https://github.com/Birfy/jitagent/blob/main/CHANGELOG.md"
 
 [project.scripts]
 jitagent = "jitagent.cli:main"

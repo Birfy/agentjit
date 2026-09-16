@@ -48,4 +48,4 @@ One model (Claude Haiku 4.5); the requirements and the audit oracle come from th
 person; the sandbox is a **correctness** sandbox, not a security one;
 `datetime.strptime` does not work inside it. See the README.
 
-[0.0.1]: https://github.com/Birfy/agentjit/releases/tag/v0.0.1
+[0.0.1]: https://github.com/Birfy/jitagent/releases/tag/v0.0.1

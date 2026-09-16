@@ -4,7 +4,7 @@
 
 **Stop your agent re-deriving the same function 200 times. Compile it once.**
 
-[![CI](https://github.com/Birfy/agentjit/actions/workflows/ci.yml/badge.svg)](https://github.com/Birfy/agentjit/actions/workflows/ci.yml)
+[![CI](https://github.com/Birfy/jitagent/actions/workflows/ci.yml/badge.svg)](https://github.com/Birfy/jitagent/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/jitagent?color=3775a9&logo=pypi&logoColor=white)](https://pypi.org/project/jitagent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![corpus](https://img.shields.io/badge/corpus-6%2F6-5ac489)](src/jitagent/corpus/)
@@ -103,7 +103,7 @@ machine: how the sandbox contains a memory bomb is platform-dependent, so "does 
 behave here?" is a real question. To work on `jitagent` itself:
 
 ```bash
-git clone https://github.com/Birfy/agentjit && cd agentjit
+git clone https://github.com/Birfy/jitagent && cd jitagent
 pip install -e ".[dev]"
 pytest                       # 102 unit tests — no network, no tokens
 ```
