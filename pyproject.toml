@@ -1,0 +1,16 @@
+[project]
+name = "agentjit"
+version = "0.1.0"
+description = "把文本需求编译成可复用的、经过验证的沙箱函数"
+requires-python = ">=3.11"
+dependencies = ["coverage>=7.4", "jsonschema>=4.21"]
+
+[project.scripts]
+agentjit = "agentjit.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
