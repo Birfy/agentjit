@@ -16,7 +16,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-HOME_DIR="${AGENTJIT_DEMO_HOME:-/tmp/agentjit-demo}"
+HOME_DIR="${JITAGENT_DEMO_HOME:-/tmp/jitagent-demo}"
 OUT="${1:-docs/demo.raw.txt}"
 PY="${PYTHON:-python3}"
 RAW="$(mktemp -d)"
@@ -31,12 +31,19 @@ show() {
   for a in "$@"; do
     case "$a" in *[\ \{\}\"]*) out="$out '$a'" ;; *) out="$out $a" ;; esac
   done
-  printf '$ agentjit%s\n' "$out" >> "$RAW/log"
+  printf '$ jitagent%s\n' "$out" >> "$RAW/log"
 }
 
 run() {
   show "$@"
-  AGENTJIT_HOME="$HOME_DIR" "$PY" -m agentjit.cli "$@" 2>&1 | tee -a "$RAW/log" >/dev/null
+  # The CLI's output goes to the transcript, not to the terminal — but if it fails, the
+  # operator is left with a bare exit code and the trap then deletes the log. A synthesis
+  # call can fail transiently, so say what happened.
+  if ! JITAGENT_HOME="$HOME_DIR" "$PY" -m jitagent.cli "$@" >>"$RAW/log" 2>&1; then
+    echo "jitagent $* failed:" >&2
+    tail -n 20 "$RAW/log" >&2
+    exit 1
+  fi
   printf '~~~\n' >> "$RAW/log"
 }
 

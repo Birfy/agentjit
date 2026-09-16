@@ -1,4 +1,4 @@
-"""agent-jit — text in, code out, fetch it back by name.
+"""jitagent — text in, code out, fetch it back by name.
 
     compile_function(requirement, examples, name="rank")  -> synthesise, verify, store
     get_code("rank")                                      -> source

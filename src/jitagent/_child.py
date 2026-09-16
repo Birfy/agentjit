@@ -114,13 +114,7 @@ def main():
     _apply_limits(job.get("mem_mb", 512), job.get("timeout_ms", 5000) // 1000 + 6)
 
     code_path = job["code_path"]
-    cov = None
-    if job.get("coverage"):
-        import coverage
-        cov = coverage.Coverage(data_file=None, branch=True, include=[code_path])
-        cov.start()
-
-    payload = {"ok": True, "results": [], "coverage": None, "load_error": None}
+    payload = {"ok": True, "results": [], "load_error": None}
     try:
         with open(code_path) as fh:
             source = fh.read()
@@ -128,8 +122,6 @@ def main():
         exec(compile(source, code_path, "exec"), g)
         fn = g[job["entry"]]
     except BaseException:
-        if cov:
-            cov.stop()
         payload["ok"] = False
         payload["load_error"] = traceback.format_exc(limit=6)
         _emit(out_fd, payload)
@@ -144,26 +136,6 @@ def main():
                 "error": f"{type(e).__name__}: {e}",
                 "tb": traceback.format_exc(limit=6),
             })
-
-    if cov:
-        cov.stop()
-        try:
-            # json_report wants a path, not a file object. Write it next to the code so
-            # it is destroyed with the temp directory.
-            report_path = code_path + ".cov.json"
-            cov.json_report(outfile=report_path)
-            with open(report_path) as fh:
-                report = json.load(fh)
-            for path, data in report.get("files", {}).items():
-                if os.path.samefile(path, code_path):
-                    payload["coverage"] = {
-                        "summary": data["summary"],
-                        "missing_lines": data.get("missing_lines", []),
-                        "missing_branches": data.get("missing_branches", []),
-                    }
-                    break
-        except Exception as e:
-            payload["coverage"] = {"error": f"{type(e).__name__}: {e}"}
 
     _emit(out_fd, payload)
 

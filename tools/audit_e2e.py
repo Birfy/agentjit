@@ -1,4 +1,4 @@
-"""The end-to-end audit: **is the function agentjit produces actually correct?**
+"""The end-to-end audit: **is the function jitagent produces actually correct?**
 
 The other script (audit_tests.py) checks whether the generated cases are right. This one
 checks the final product, against a yardstick **the pipeline has never seen**:
@@ -8,7 +8,7 @@ checks the final product, against a yardstick **the pipeline has never seen**:
     existed.
 
 Take that as the answer key and run 200 random inputs through the compiled code. This is
-the question that actually matters -- **"is the function agentjit produced correct"**,
+the question that actually matters -- **"is the function jitagent produced correct"**,
 not "does the function it produced pass the tests it wrote itself".
 
 Passing its own tests but failing here = the generated cases are too weak and missed a
@@ -29,10 +29,10 @@ import time
 sys.path.insert(0, "src")
 sys.path.insert(0, "tools")
 
-from agentjit import Registry, Sandbox                     # noqa: E402
-from agentjit.jit import compile_function                  # noqa: E402
-from agentjit.llm import ClaudeCliClient                   # noqa: E402
-from agentjit.types import deep_equal                      # noqa: E402
+from jitagent import Registry, Sandbox                     # noqa: E402
+from jitagent.jit import compile_function                  # noqa: E402
+from jitagent.llm import ClaudeCliClient                   # noqa: E402
+from jitagent.types import deep_equal                      # noqa: E402
 from audit_tests import TASKS                              # noqa: E402
 
 N_RANDOM = 200
@@ -63,7 +63,7 @@ def one(task, sb, seed) -> dict:
     t0 = time.time()
     r = compile_function(task.requirement, task.examples(),
                          client=ClaudeCliClient(model="haiku"),
-                         registry=Registry(f"/tmp/agentjit-e2e-4/{task.key}-{seed}"),
+                         registry=Registry(f"/tmp/jitagent-e2e-4/{task.key}-{seed}"),
                          sandbox=sb, cache="force_new", name=None or "", gen_tests=8)
     row = {"key": task.key, "shape": task.shape, "seed": seed,
            "compiled": r.ok, "attempts": len(r.synth.attempts) if r.synth else 0,

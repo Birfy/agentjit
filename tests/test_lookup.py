@@ -12,12 +12,12 @@ re-verification.
 """
 import pytest
 
-from agentjit import Example, Level, Registry, Report, Sandbox, Spec
-from agentjit.jit import NeedsClient, compile_function, search_functions
-from agentjit.llm import ScriptedClient
-from agentjit.lookup import find, schema_compatible, similarity
-from agentjit.synth import spec_for
-from agentjit.types import GateResult
+from jitagent import Example, Level, Registry, Report, Sandbox, Spec
+from jitagent.jit import NeedsClient, compile_function, search_functions
+from jitagent.llm import ScriptedClient
+from jitagent.lookup import find, schema_compatible, similarity
+from jitagent.synth import spec_for
+from jitagent.types import GateResult
 
 SUM_REQ = ("Group CSV rows by the type field and sum the amount, returning "
            "{type: total}. The amount may carry a currency symbol and thousands "

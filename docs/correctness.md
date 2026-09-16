@@ -12,7 +12,7 @@
 > coverage, fuzzing and mutation testing were all built and then removed, because across
 > the whole corpus not one of them ever caught a mistake a real model made. See the
 > "What was cut, and why" section of the [README](../README.md) and the header of
-> `src/agentjit/verify.py`. The reasoning here is kept because it is what any future
+> `src/jitagent/verify.py`. The reasoning here is kept because it is what any future
 > addition has to argue against.
 
 ---

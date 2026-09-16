@@ -1,4 +1,4 @@
-"""Let agentjit write the test cases out in full.
+"""Let jitagent write the test cases out in full.
 
 **This step violates the warning in
 [correctness.md §1](../../docs/correctness.md)**, so let's say it

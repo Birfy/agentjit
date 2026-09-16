@@ -1,19 +1,54 @@
 [project]
-name = "agentjit"
-version = "0.1.0"
+# `agentjit` is taken on PyPI by a different, actively published project whose wheel
+# also installs a top-level `agentjit` package — so sharing the name would not just be
+# confusing, the two would silently overwrite each other in site-packages. Everything
+# here is `jitagent`: the distribution, the import name, the CLI and the repository.
+name = "jitagent"
+version = "0.0.1"
 description = "Compile a plain-text requirement into a reusable, verified, sandboxed function"
+readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["coverage>=7.4", "jsonschema>=4.21"]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Birfy", email = "birfychen@gmail.com" }]
+keywords = ["llm", "agent", "code-generation", "sandbox", "jit", "verification"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Testing",
+]
+# jsonschema is the only runtime dependency: it is the yardstick for both the input
+# guard and the return-schema gate. `coverage` used to be here for the branch-coverage
+# gate; that gate is gone, so the dependency went with it.
+dependencies = ["jsonschema>=4.21"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1.2", "twine>=5.1"]
+
+[project.urls]
+Homepage = "https://github.com/Birfy/jitagent"
+Repository = "https://github.com/Birfy/jitagent"
+Issues = "https://github.com/Birfy/jitagent/issues"
+Changelog = "https://github.com/Birfy/jitagent/blob/main/CHANGELOG.md"
 
 [project.scripts]
-agentjit = "agentjit.cli:main"
+jitagent = "jitagent.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The corpus ships with the package so `jitagent selftest` works from a pip install,
+# not only from a git checkout.
+[tool.setuptools.package-data]
+jitagent = ["corpus/*/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

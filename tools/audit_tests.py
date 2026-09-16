@@ -1,4 +1,4 @@
-"""Audit the cases agentjit writes: **are the expected values actually right?**
+"""Audit the cases jitagent writes: **are the expected values actually right?**
 
 The whole design rests on one assumption — that the expectations the model writes into
 its cases are correct. A case with a wrong expected value condemns a correct
@@ -35,9 +35,9 @@ from typing import Any, Callable
 
 sys.path.insert(0, "src")
 
-from agentjit import Example                       # noqa: E402
-from agentjit.llm import ClaudeCliClient           # noqa: E402
-from agentjit.propose import propose_tests         # noqa: E402
+from jitagent import Example                       # noqa: E402
+from jitagent.llm import ClaudeCliClient           # noqa: E402
+from jitagent.propose import propose_tests         # noqa: E402
 
 
 @dataclass

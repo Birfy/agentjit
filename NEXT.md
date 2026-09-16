@@ -90,13 +90,13 @@ Not many left; after the cull there are four:
 
 ## Read before starting
 
-1. The header of `src/agentjit/propose.py` — one model writing both the code and the tests
+1. The header of `src/jitagent/propose.py` — one model writing both the code and the tests
    that judge it is circular; which part of that each of the three mitigations solves, and
    which part cannot be solved
-2. The header of `src/agentjit/verify.py` — which five gates were cut, why, and which one is
+2. The header of `src/jitagent/verify.py` — which five gates were cut, why, and which one is
    most likely to come back
 3. The header of `tools/audit_tests.py` — the audit protocol. The reference implementation
    has to be written **before** any generated case is seen, or it starts finding reasons why
    the model's answer was fine
-4. The header of `src/agentjit/lookup.py` — why retrieval is allowed to be crude, and where
+4. The header of `src/jitagent/lookup.py` — why retrieval is allowed to be crude, and where
    being crude does not matter

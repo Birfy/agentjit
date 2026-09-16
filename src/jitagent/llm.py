@@ -103,7 +103,7 @@ class AnthropicClient:
 # independent of the prompt content. Measured with an empty "repeat this sentence" task:
 # about 22.2k input tokens. Any token accounting based on the CLI has to subtract it,
 # or synthesis looks an order of magnitude more expensive than it is — that overhead
-# belongs to Claude Code, not to agentjit.
+# belongs to Claude Code, not to jitagent.
 CLI_OVERHEAD_TOKENS = 22_200
 
 
@@ -134,7 +134,7 @@ class ClaudeCliClient:
     def _argv(self, system: str) -> list[str]:
         return [
             self.binary, "-p", "--model", self.model,
-            # Replace Claude Code's own system prompt with agentjit's. Without this the
+            # Replace Claude Code's own system prompt with jitagent's. Without this the
             # model receives two sets of instructions that contradict each other.
             "--system-prompt", system,
             "--exclude-dynamic-system-prompt-sections",
