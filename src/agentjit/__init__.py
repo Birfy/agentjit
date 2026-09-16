@@ -4,9 +4,11 @@
     get_code("rank")                                      -> source
     call_function("rank", {...})                          -> run it in the sandbox
 
-Correctness rests on **the test cases**. Beyond that there are only two gates: the
-static check (generated code must not read files or import anything) and the sandbox
-(it runs on your machine).
+Correctness rests on **the test cases**. Beyond them only two things can reject an
+implementation: the static check (generated code must not read files or import anything)
+and the return schema inferred from your examples — which is the same check the runtime
+applies on every call, not a separate opinion. Everything runs in a sandbox, because it
+runs on your machine.
 """
 from .types import Example, GateResult, Level, Report, Spec
 from .registry import Function, Registry, TestSet, Version

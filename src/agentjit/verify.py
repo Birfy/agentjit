@@ -1,8 +1,15 @@
 """Verification: static check, then run the caller's test cases.
 
-**Correctness comes from the test cases.** So there are only two things here: one for
-safety (generated code must not read files or import anything) and one for
-correctness (it must pass your cases).
+**Correctness comes from the test cases.** So three things can reject an implementation,
+and no more: the static check (generated code must not read files or import anything),
+your cases (it must pass every one), and the return schema — which is not a fourth
+opinion, but the shape of your own examples, checked again on what came back. The runtime
+applies that same schema on every call, so a result that would be rejected there is
+rejected here too rather than being stored and failing later.
+
+There is also a non-blocking `examples.sufficiency` gate. It does not reject anything; it
+records that with no cases there is nothing to judge against, which is what makes the
+result EPHEMERAL and keeps it out of the cache.
 
 There used to be five more gates — a hold-out split, branch coverage, fuzzing,
 determinism, mutation testing. They did not answer "is this code correct", they

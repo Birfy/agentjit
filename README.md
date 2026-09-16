@@ -1,281 +1,438 @@
-# agent-jit
+<div align="center">
 
-一个外挂组件：**一段话进去，长出代码，之后按名字拿回来。**
+# agentjit
+
+**A paragraph of text goes in. Code comes out. You fetch it back by name.**
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![tests](https://img.shields.io/badge/tests-102%20passing-5ac489)](tests/)
+[![corpus](https://img.shields.io/badge/corpus-6%2F6-5ac489)](tests/corpus/)
+[![no API key needed](https://img.shields.io/badge/API%20key-not%20required-a78bfa)](#backends)
+[![status](https://img.shields.io/badge/status-working%20prototype-e0af68)](#known-gaps)
+
+<img src="docs/demo.svg" alt="agentjit: compile a requirement, call it, list the registry" width="100%">
+
+</div>
+
+An agent is good at working out *what* to do. It is expensive and unreliable at doing the
+same thing two hundred times. `agentjit` takes the repetitive part, compiles it into a
+real function once, verifies it, and stores it under a name you choose.
+
+This is what a JIT does to an interpreter: a hot path should not be re-derived on every
+pass. Compile it once, then just run it.
+
+```
+first call    synthesise + verify   ~20-60s,  a few thousand tokens
+every call    sandboxed execution   ~30ms,    zero tokens
+```
+
+---
+
+## Quickstart
 
 ```bash
-agentjit compile rank.json --name rank    # 一段话 + 几个例子 → 补用例 → 写代码 → 验
-agentjit get  rank                        # 把代码打出来
-agentjit call rank '{"records": [...]}'   # 在沙箱里调用
+git clone https://github.com/Birfy/agentjit && cd agentjit
+pip install -e ".[dev]"
 ```
+
+You need **no API key**. If you have [Claude Code](https://claude.ai/code) installed,
+`agentjit` shells out to it and uses its authorisation.
+
+Check everything works — no network, no tokens:
+
+```bash
+pytest              # 102 unit tests
+agentjit selftest   # 6 corpus cases, each with a deliberately planted bug
+```
+
+### Compile something
+
+A requirement is a JSON file: a sentence, plus a few examples that pin down what you mean.
+The examples are not decoration — they are the spec, and nothing without them reaches the
+cache.
+
+```json
+{
+  "requirement": "Rank {name, score} records from highest score to lowest. Records with the same score share a rank, and the next rank skips accordingly (1, 1, 3 — not 1, 1, 2). Within a tie, order by name ascending.",
+  "examples": [
+    { "input":  { "records": [{"name": "alice", "score": 90},
+                              {"name": "bob",   "score": 85},
+                              {"name": "carol", "score": 90}] },
+      "output": [{"name": "alice", "rank": 1},
+                 {"name": "carol", "rank": 1},
+                 {"name": "bob",   "rank": 3}],
+      "note": "tie, then skip" },
+
+    { "input": { "records": [] }, "output": [], "boundary": true }
+  ]
+}
+```
+
+That is [`examples/rank.json`](examples/rank.json), so you can run the next block as it
+stands.
+
+```bash
+agentjit compile examples/rank.json --name rank   # write the cases, then the code
+agentjit get     rank                             # print the source
+agentjit call    rank '{"records": [...]}'        # run it in the sandbox
+agentjit list                                     # what is in the registry
+agentjit search  "rank records by score"          # is there one already?
+agentjit inspect rank                             # cases, versions, verification report
+```
+
+The registry lives in `~/.agentjit/registry` — set `AGENTJIT_HOME` or pass `--home` to put
+it somewhere else.
+
+### From Python
 
 ```python
-compile_function("把 {name, score} 按 score 排名次…", examples, name="rank")
-get_code("rank")                      # 源码
-call_function("rank", {"records": [...]})   # × 200
+from agentjit import compile_function, get_code, call_function, Example
+from agentjit.llm import ClaudeCliClient
+
+compile_function(
+    "Rank {name, score} records from highest score to lowest...",
+    [Example({"records": [{"name": "alice", "score": 90}]}, [{"name": "alice", "rank": 1}]),
+     Example({"records": []}, [], boundary=True)],
+    name="rank",
+    client=ClaudeCliClient(),
+)
+
+get_code("rank")                           # the source, as a string
+call_function("rank", {"records": [...]})  # run it, 200 times if you like
 ```
 
-**生成方式是可替换的** —— `compile_function` 只要一个 `complete(system=, user=)`
-的对象。自带三个：直连 API、走本机 `claude` CLI（不要 API key）、回放脚本（测试用）。
+The CLI picks a backend for you; the library does not. `compile_function` raises
+`NeedsClient` on a cache miss with no `client=`, rather than quietly shelling out to
+something — reading the cache and spending tokens should not look the same from the
+outside.
 
-第 1 次比 agent 自己算贵，之后每次调用只花一次沙箱执行的时间（~30ms，0 token）。
+### Backends
 
-Agent 擅长的是"想清楚要做什么"，不是"做 200 遍"。后者交给代码——这正是 JIT
-对解释器做的事：热点不该每次重新推理，该编译一次然后直接跑。
+`compile_function` takes any object with `complete(system=, user=)`. Three come with it:
 
-## 设计上的四条主张
+| Backend | Needs | Use |
+| --- | --- | --- |
+| `ClaudeCliClient` | the local `claude` CLI | **the default**; no API key |
+| `AnthropicClient` | `ANTHROPIC_API_KEY` | direct API access |
+| `ScriptedClient` | nothing | replays canned replies; how the tests run with no network |
 
-- **正确性靠测试用例，不靠额外的机制。** 早先这里有保留集、分支覆盖、模糊测试、
-  变异测试五道关卡回答"你的用例够不够强"。它们全删了 —— 那是**给调用方的建议，
-  不是判定**，而且七道关卡从来没抓到过一次真实模型的错误。
-- **用例由 agentjit 补完整，但可信度仍然只来自调用方。** 模型自己写测试验自己写的
-  代码是循环论证。三条缓解：测试**先于**代码单独生成、调用方的种子例子是锚、
-  生成的用例单独标记 —— 只挂在生成用例上的失败**交回给调用方裁决**，不算代码有 bug。
-  说到底：补用例是**把判据变厚，不是把判据变可信**。
-- **沙箱里一个洞都不开。** 生成的代码没有任何 I/O 能力，要做外部操作只能通过 IPC
-  向宿主请求，宿主鉴权、限额、审计后代执行。能力控制集中在一处。
-- **用例是资产，代码是可再生的。** Registry 以用例为中心，代码只是当前通过它的
-  一个实现。模型升级 = 免费的全库重生成。
+Swapping in your own model is one class with one method.
 
-## 现状：闭环跑通了
+---
 
-每一部分都能独立测，而且不打网络、不花 token：验证靠人为植入错误的语料，
-合成和补用例靠回放脚本，复用靠 registry 的落盘和查找。
+## How a compile works
+
+```
+a sentence + a few seed examples
+   │
+   │  call 1  write the test cases   ← the code does not exist yet, so it cannot
+   │                                   influence the cases
+   │  call 2..4  write the code → static check → run every case
+   │             → structured feedback → write it again
+   ▼
+stored: the cases + the code + the verification report
+```
+
+**Generating the cases before the code is part of the design, not an implementation
+detail.** The obvious objection to any of this is circular reasoning: one model writing
+both the code and the tests that judge it. Writing the cases first removes the strongest
+link in that circle — when the cases are written, there is no implementation for them to
+be shaped by.
+
+The link it cannot remove is "the same model misreads the requirement the same way twice".
+So, three more things:
+
+- **Your seed examples are the anchor.** A generated case that collides with a seed is
+  dropped, and the drop is reported.
+- **Generated cases are marked** `origin="generated"`. A failure that only occurs on
+  generated cases is **ambiguous** — the code may be wrong, or that case's expected value
+  may be. `agentjit` reports it for you to adjudicate rather than calling it a bug.
+  Condemning correct code with a wrong case is far harder to debug than missing a bug.
+- **Anything the requirement left open must be declared.** If a case rests on a decision
+  the requirement never made — which way `0.5` rounds, whether an empty string counts as
+  empty — the model has to record it in an `assumes` field. That field exists because
+  measurement forced it; see [below](#vague-requirements-are-the-real-risk).
+
+In short: generating cases makes the criteria **thicker**, not more **trustworthy**. Only
+your examples do the second thing.
+
+Three things can fail a synthesis, and no more: the static check, one of the cases, or a
+return value that breaks the schema inferred from your examples — and that last one is not
+a separate opinion, it is the same check the runtime applies on every call. The feedback is
+structured — `input X / expected Y / actual Z / traceback` — never "that failed, try
+again".
+
+---
+
+## Four design claims
+
+- **Correctness rests on test cases, not on extra machinery.** There used to be five more
+  gates here — a hold-out split, branch coverage, fuzzing, mutation testing, post-assertions
+  — all answering "are your cases strong enough?". They are gone. That is **advice to the
+  caller, not a verdict**, and across the whole corpus none of the seven gates ever caught a
+  mistake a real model made.
+- **`agentjit` writes the cases out in full; the trust still comes only from you.** See
+  above.
+- **No holes in the sandbox.** Generated code has no I/O capability at all. Anything
+  external has to be requested from the host over IPC, which authorises, meters and audits
+  it. Capability control lives in one place.
+- **The cases are the asset; the code is regenerable.** The registry is organised around
+  the test set, and the code is just an implementation that currently passes it. A better
+  model means a free regeneration of everything.
+
+---
+
+## Does it actually work?
+
+Everything below is measured and re-runnable. The audits share one oracle: six
+**reference implementations, transcribed literally from the requirement text and written
+before any generated case or any generated code existed**. Six requirements, deliberately
+spread across shapes — log parsing, counting working days, flattening nested data, top N
+per group, stateful aggregation, splitting an amount with rounding.
+
+### Audit 1 — are the generated cases right?
 
 ```bash
-pip install -e .
-agentjit selftest                        # 6 个语料用例，每个针对一道关卡
-pytest                                   # 102 个单测
-agentjit compile examples/rank.json --name rank   # 真的编译一个（走本机 claude CLI）
+python tools/audit_tests.py && python tools/audit_traps.py
 ```
-
-### 第一次真实合成的数
-
-`examples/rank.json`（并列名次跳号 + 同分按字典序）刻意选了一个没在测试里出现过
-的任务 —— 测试里的实现是人写的，证明不了合成质量。Haiku 4.5 跑 5 次：
 
 | | |
 | --- | --- |
-| 成功率 | **5 / 5**，全部 `VERIFIED` |
-| 尝试次数 | **每次都是 1 次就对**，修复循环没被用上 |
-| token | 1841 in / 2671~6711 out（已扣掉 CLI 的固定开销） |
-| 墙钟 | 28~62s |
+| generated expectations agreeing with the reference | **48 / 48** |
+| planted traps exercised by at least one case | **18 / 18** |
 
-**最该盯的那件事有答案了：关卡在真实模型产物上零误报。** 之前的担心是"语料里的
-错误实现是人写的，真实模型写出来的代码长得不一样，关卡可能在正确代码上卡住"——
-5 次里一次都没有。（那时还有 7 道关卡，后来砍到 2 道，见下面「砍掉了什么」。）
+The first number alone would mean nothing: a model that only ever writes `f([]) == []`
+scores 100% and has tested nothing. **The second is what makes the first worth reading.**
+The traps are the places each requirement is easy to misread — a `]` inside the message
+body, `start` later than `end`, an empty dict that has to be discarded, two people on the
+same salary, a duplicate `start`, a remainder that has to be handed out by descending
+weight — and `audit_traps.py` checks each one **as a predicate over the case's input**, so
+a note claiming to test a tie cannot pass without a tie in the data.
 
-5 次都一次写对，所以当时修复循环一次也没跑到。后来加了 6 个需求才压到（见下）。
+### Audit 2 — is the compiled function right?
 
-### 编译一个函数
-
-```
-一段话 + 几个种子例子
-   ↓ 调用 1：补用例（代码还不存在，所以代码影响不了用例）
-   ↓ 调用 2~4：写代码 → 静态检查 → 跑全部用例 → 结构化反馈 → 再写
-   ↓
-入库：用例 + 代码 + 验证报告
+```bash
+python tools/audit_e2e.py
 ```
 
-**先补用例再写代码，顺序是设计的一部分。** 写用例的时候实现还不存在，代码就没法
-反过来影响用例 —— 这去掉了循环论证里最强的那一环。去不掉的那一环是"同一个模型
-同一个误读"，所以：
+Audit 1 checks the cases. This checks the final product, against the same references, on
+200 random inputs each.
 
-- 调用方给的种子例子是**锚**。生成的用例和种子撞车时，种子赢，生成的直接丢掉。
-- 生成的用例标着 `origin="generated"`。**只挂在生成用例上的失败是有歧义的** ——
-  可能代码错了，也可能那条用例的期望值算错了。这种情况原样报给调用方裁决，
-  不说成"代码有 bug"。拿一条错用例否决正确代码，比漏个 bug 难查得多。
+<!-- E2E NUMBERS -->
 
-#### 实测一：补出来的用例对不对（6 个需求 × 8 条）
+Both directions have to be visible: **passing its own cases but failing here** means the
+generated cases were too weak and missed a real bug; **failing its own cases but passing
+here** means a generated case had a wrong expectation and condemned correct code.
 
-`tools/audit_tests.py`，可重跑。协议：需求、种子、**参考实现**三样一起写死，写的
-时候还没见过任何生成用例；参考实现按需求原文直译，是这次审计的 oracle。
+### Vague requirements are the real risk
 
-| 需求形态 | 期望值一致 | 我埋的坑碰到几个 |
+The requirements above were all written by one person and **written precisely on
+purpose**. Real requirements are vague, and vagueness is where the risk is. A separate
+round on deliberately vague ones ("round to the nearest integer" without saying which way
+`0.5` goes, "deduplicate" without saying on what, "strip empty values" without saying
+whether an empty string counts) split two ways:
+
+- **Dodging it** — writing `1.5` but not `2.5` (both readings agree on `1.5`; only `2.5`
+  forks); testing `null` but not `""` or `0` or `false`. Safe, but it resolves nothing.
+- **Asserting silently** — on "deduplicate a list of records", three decisions the
+  requirement never made ("compare whole records", "keep the first", "preserve order")
+  were written into the cases as settled fact. **This is the dangerous one**: a caller who
+  read it the other way gets their correct implementation condemned.
+
+That is why the `assumes` field exists: a decision the requirement did not make, that the
+model settled itself, **has to be written down**. Re-running the same three requirements
+afterwards, the behaviour inverted — `2.5` was written (declaring "rounds away from zero")
+and `{a:0, b:false, c:"", d:null}` was written (declaring "empty means null only"). When a
+failure lands on such a case, the report says plainly that **this is not anyone being
+wrong, it is the requirement being underspecified.**
+
+> That specific vague-requirement experiment was run before the translation, on the
+> Chinese prompts, and has not been repeated word for word. What the English run does show
+> is that the mechanism is live: **4 of the 6 requirements above produced at least one
+> declared assumption** (5 cases in total), unprompted, on requirements that were written
+> to be precise. `tests/test_propose.py` pins the attribution behaviour that follows.
+
+---
+
+## Reuse: fetch it back by name
+
+Compiling once saves nothing. The saving is in not compiling the second time.
+
+What is stored is the **test set**; `code.py` is just an implementation that currently
+passes it. One `spec_hash` can hold several versions, and the newest wins. The cases belong
+to the spec rather than to a version — otherwise every regeneration copies them, the copies
+drift, and "a better model means a free regeneration" loses the thing it rests on.
+
+A call goes through three steps: **param schema → sandbox → return schema.** Both schemas
+are inferred from the shape of your examples, not guessed, and they are the same yardstick
+verification used. **A call is a pure read** — nothing is written to disk, there is nothing
+to flush, and concurrent processes do not fight.
+
+### Lookup: retrieval affects the hit rate, re-verification decides correctness
+
+There are a thousand ways to phrase the same requirement, so using the text as a cache key
+gives a hit rate close to useless. Lookup has three levels:
+**L1 exact `spec_hash` → L2 candidate retrieval + re-run *this run's* examples → L3 miss,
+go synthesise.**
+
+One measurement shaped the whole design. Take a requirement — "group CSV rows by the type
+field and sum the amount" — and compare its character-bigram overlap with three genuine
+rewrites, and with one sentence that changes only "sum" to "average". The comparison is
+pinned by a test, in `tests/test_lookup.py`:
+
+| Compared against | Similarity |
+| --- | --- |
+| three genuine rewrites | 0.54 / 0.52 / 0.51 |
+| **"sum" changed to "average"** | **0.61** |
+| an unrelated requirement (ranking) | 0.26 |
+
+**The one that behaves completely differently is closer, as text, than any honest
+rewrite.** [design.md §6.1](docs/design.md) argues that embeddings put them just as close
+together, so this is not something switching to vectors fixes — that part is an argument,
+not a measurement, but the conclusion below does not depend on it.
+
+The conclusion: **retrieval quality affects the hit rate, not correctness.** An L2 hit
+*must* re-run the requesting caller's examples; failing that, it is treated as a miss. So
+retrieval is allowed to be crude — crude retrieval misses a few hits, it can never hand
+back a wrong function. A vector index is an optimisation for when the registry outgrows a
+linear scan, **not** a correctness mechanism. Keep those two apart and L2 stops being
+scary.
+
+The schema filter validates **this run's examples against the candidate's schema**, rather
+than comparing two schemas structurally. The latter needs a definition of "compatible";
+the former asks the question that actually matters, and uses the same yardstick as the
+runtime input guard — so you can never get the contradiction where lookup says compatible
+and the guard then rejects the call.
+
+**An L1 hit is re-verified too**, which the design document said was unnecessary. It costs
+one sandbox run and no tokens, and it catches a real situation: same requirement text, but
+this time your examples differ from last time — because the old expectation was wrong, or
+because the requirement has been re-understood. Serving the stored version then means
+shipping an implementation already known not to satisfy the current criteria. When
+re-verification fails, a new version is synthesised: `cache: reused_with_new_version`.
+
+After a hit, **this run's examples are merged into the test set**. They just passed
+re-verification, so they are real criteria the current implementation agrees with — a cache
+hit thickens the function on its way past, and the next regeneration is that much safer.
+
+---
+
+## What was cut, and why
+
+The decision rested on one fact: **of seven gates, not one ever caught a mistake a real
+model made.** Everything they caught was a bug planted by hand in the corpus. So they were
+all built by reasoning from a document, not forced into existence by a real failure.
+
+Removed: hold-out splitting and rotation, the 100% branch-coverage threshold, fuzzing,
+determinism checking, mutation testing, post-assertions, probes, `QUARANTINED`
+sequestration, three-way version ranking, and `net_savings` accounting.
+
+| | before | after |
 | --- | --- | --- |
-| 日志行解析 / 工作日计数 / 嵌套压平 / 分组取前 N / 带状态聚合 / 金额分摊 | **48/48** | **18/18** |
+| lines under `src/` | 3647 | 2450 |
+| one verification run | 727ms | 34ms |
+| tunable parameters | 21 | 4 |
 
-48/48 本身说明不了什么 —— 模型只挑简单的写，一致率就是白送的。**18/18 碰到了坑**
-才让这个数有意义（消息正文含 `]`、start 晚于 end、空 dict 要丢弃、组内同薪、
-重复 start、余数分配看下标……）。
+(`src/` measures 2914 lines today; the translation to English added prose, not machinery.)
 
-#### 实测二：最终产物对不对（6 个需求 × 2 轮 × 200 个随机输入）
+**The most likely thing to come back is the hold-out split**: keeping some cases away from
+the repair loop, which guards against a model writing `if input == X: return Y` against the
+cases it can see. It costs no extra tokens. The reasoning is recorded at the top of
+`verify.py`.
 
-`tools/audit_e2e.py`。上面验的是用例，这个验**编译出来的代码**，判据是同一批
-参考实现 —— 管道从头到尾没见过它们。
+---
 
-    编译成功 12/12　　对参考实现 2400 个随机输入：12/12 全部 200/200 一致
-
-两个方向都要看得见：**生成的用例过了但参考实现不过** = 用例太弱漏了真 bug；
-**参考实现过了但生成的用例不过** = 用例算错了，把正确代码判死。两种都没出现。
-
-#### 但含糊的需求是另一回事
-
-上面 12 个需求都是我写的，**刻意写精确了**。真实需求含糊，含糊才是风险。
-另跑一轮专测含糊的（"四舍五入"没说 0.5 往哪边、"去重"没说按什么去重、
-"去掉空值"没说空字符串算不算空），结果分两半：
-
-- **绕开**：只写 1.5 不写 2.5（1.5 在两种读法下答案相同，2.5 才分叉）；
-  只测 `null` 不测空字符串/0/false。安全，但也没解决歧义。
-- **默默断言**：去重那三个需求根本没提的决定，全被当成确定事实写进用例。
-  **这是危险的那种** —— 调用方另一种读法的话，正确实现会被判死。
-
-所以有了 `assumes` 字段：需求没说清而模型自己定了的决定，**必须写出来**。
-改完重跑同样三个需求，行为反过来了：2.5 写了（声明"向远离零方向舍"）、
-`{a:0,b:false,c:"",d:null}` 写了（声明"空值仅指 null"）。挂在这种用例上时，
-报告直说**"这不是谁错了，是需求没说清"**。
-
-#### 修复循环终于被压到了一次
-
-12 轮里 11 轮一次写对，只有「工作日计数」两轮都卡住：第一次 `examples: 0/10 通过`
-（十条全挂），反馈之后救回来，最终 200/200 正确。
-
-挖下去发现**不是模型的错**：两版逻辑一模一样，只差一个 API ——
-`datetime.datetime.strptime` 在沙箱里必挂。它第一次调用时才 import `_strptime`，
-而受限 builtins 里没有 `__import__`。
-
-修沙箱就得往 builtins 里放 `__import__`，那和"沙箱里一个洞都不开"直接冲突 ——
-省一轮合成，赌整个沙箱边界，不划算。改成**在 prompt 里告诉模型别用它**。
-再测：**2~3 次尝试降到 1 次，3/3 复现，墙钟砍一半**。
-
-判不通过的只有两件事：静态检查没过，或者用例没过。反馈是结构化的：
-`输入 X / 期望 Y / 实际 Z / traceback`，不是"没通过，再试试"。
+## The corpus: a gate that fires on the wrong thing is also a failure
 
 ```bash
-pip install -e . && agentjit selftest
+agentjit selftest
 ```
 
 ```
-ok   01_correct         VERIFIED   -           正确实现应该一路绿灯
-ok   02_wrong_no_clean  REJECTED   examples    没做清洗，第一个例子就对不上
-ok   08_malicious       REJECTED   static      读文件 + getattr 逃逸
-ok   09_insufficient    EPHEMERAL  -           一个用例都不给，判不了对错，不进缓存
-ok   10_timeout         REJECTED   examples    死循环，父进程墙钟兜住
-ok   11_memory_bomb     REJECTED   examples    内存炸弹，rlimit/看门狗兜住
+ok   01_correct         VERIFIED   -          a correct implementation should sail through
+ok   02_wrong_no_clean  REJECTED   examples   no cleaning, so it fails the very first case
+ok   08_malicious       REJECTED   static     reads a file and escapes via getattr
+ok   09_insufficient    EPHEMERAL  -          no cases, so nothing to judge — not cached
+ok   10_timeout         REJECTED   examples   a loop that never exits; the wall clock catches it
+ok   11_memory_bomb     REJECTED   examples   a memory bomb; rlimit or the watchdog contains it
 ```
 
-**关卡漏报和误报都算失败** —— 一个在正确代码上误报的关卡比漏报更难排查。
+**Both a miss and a false positive count as failure.** A gate that fires on correct code is
+harder to diagnose than one that lets a bug through — which is exactly what the cull above
+was about.
 
-### 复用：按名字取回来
+---
 
-编译一次不省钱，省钱的是第二次之后不用再编译。
+## Known gaps
 
-```bash
-agentjit list                                 # 库里有什么
-agentjit search "按 type 汇总 amount"          # 写需求前先看看有没有现成的
-agentjit get   rank                           # 把代码打出来
-agentjit call  rank '{"records": [...]}'      # 调一次（也认 rank@v2）
-agentjit inspect rank                         # 用例、版本、验证报告
-```
+- **One model, three attempts maximum.** Every number here rests on Claude Haiku 4.5. What
+  happens with a different model, a different temperature, or more rounds is unknown.
+- **Vague requirements have only a qualitative result.** After the `assumes` change the
+  model does declare its assumptions, but how *accurate* those declarations are, and how
+  often it misses one it should have made, has not been quantified.
+- **Every requirement here was written by the same person who wrote the audit.** Someone
+  writing a requirement while knowing what they intend to test writes more clearly than
+  they realise.
+- **The reference implementations share one reading with their author.** The audit oracle
+  is a literal transcription of the requirement — so if the model misreads the requirement
+  the same way the author did, this audit cannot see it. The requirements are the author's,
+  so "my reading is the spec" holds here; it would not for someone else's requirement.
+- **The sandbox is a correctness sandbox, not a security sandbox.** Restricted builtins, an
+  AST allowlist, rlimits and a memory watchdog contain accidents and casual escapes. They do
+  not contain a serious attacker. macOS ignores `RLIMIT_AS` outright, so the memory ceiling
+  there rests on the parent polling RSS.
+- **`datetime.strptime` does not work** inside the sandbox — it imports `_strptime` on first
+  call, and the restricted builtins have no `__import__`. Other lazily-importing standard
+  library functions may have the same problem; this is the only one hit so far. The prompt
+  tells the model to use `datetime.date.fromisoformat` instead, and a test keeps the
+  limitation and the prompt in step.
+- **The lexical similarity floor is script-dependent.** In Chinese two unrelated
+  requirements score ~0.03; in English the shared-bigram floor alone puts them at ~0.21-0.28,
+  against `MIN_SIMILARITY = 0.20`. No single number separates both, which is why the
+  threshold is only a cost knob — the schema check keeps an unrelated candidate out of the
+  sandbox, and re-verification is what keeps a wrong one out of your hands.
+- **Token counts through the CLI are estimates.** `claude -p` carries about 22.2k tokens of
+  fixed overhead (Claude Code's own system prompt and tool definitions). It is subtracted,
+  but the constant moves with the CLI version.
 
-存的核心是**用例**，`code.py` 只是"当前通过它的一个实现"。一个 `spec_hash` 下可以
-有多个版本，取最新的；用例属于 spec 不属于版本，否则每次重生成都要复制一份，
-"模型升级 = 免费的全库重生成"就没了依托。
+---
 
-调用走三步：**入参 schema → 沙箱 → 返回 schema**。两道 schema 都是从例子结构反推
-的，不是猜的，而且和验证时用的是同一把尺子。**调用是纯读** —— 不写盘、不需要
-flush、进程之间不会打架。
-
-### 查找：检索只管命中率，复验才管正确性
-
-同一件事有一万种说法，拿原文当 key 的话缓存命中率低到没意义。三级查找：
-**L1 `spec_hash` 精确匹配 → L2 候选检索 + 用本次例子复验 → L3 miss，去合成。**
-
-动手前先量了一个数，它决定了整个设计。拿 `examples/group_sum.json` 那句需求，
-跟三种真正的改写、以及一句只把"求和"换成"求平均"的比字符二元组重合度：
-
-| 对比对象 | 相似度 |
-| --- | --- |
-| 三种真正的改写 | 0.41 / 0.32 / 0.29 |
-| **把"求和"换成"求平均"** | **0.54** |
-| 完全不相干的"排名次" | 0.03 |
-
-**行为完全不同的那个，字面上比任何一句真改写都近。** design.md §6.1 说向量空间里
-也一样近。所以检索必然把错的排在最前面 —— 这不是换成向量能解决的问题。
-
-结论：**检索质量只影响命中率，不影响正确性。** L2 命中必须用本次请求的例子跑一遍
-复验，跑不过就当 miss。所以检索可以很土 —— 土的检索只是少命中几次，绝不会交出一个
-错的函数。现在用的字符二元组是中文没有分词时的土办法；向量索引是 registry 大到
-线性扫不动之后的优化，**不是**正确性机制。把这两件事分清楚，L2 就不吓人了。
-
-schema 兼容性过滤用**本次的例子去验候选的 schema**，而不是比较两份 schema 的结构：
-后者要先定义"兼容"是什么意思，前者直接问了真正要回答的问题，而且和运行时那道入参
-guard 用的是同一把尺子，不会出现"查找说兼容、调用时被 guard 拦下"。
-
-**L1 命中也复验**（design.md 说 L1 直接用，这里没照做）。复验只要一次沙箱运行、
-不花 token，而它挡住的是一个真场景：同一段需求文本，这次的例子和上次不一样 ——
-上次的期望写错了，或者需求被重新理解了。这时直接用旧版本，就是拿一个已知不满足
-本次判据的实现去交差。复验不过就合成新版本，也就是 `cache: reused_with_new_version`。
-
-命中之后把**本次的例子并进用例集**：它们刚通过复验，就是和当前实现一致的真判据 ——
-一次缓存命中顺手把这个函数的用例变厚一点，下次换模型重生成就更安全一点。
-
-### 砍掉了什么，为什么
-
-判断依据是一条事实：**7 道关卡里，没有一道抓到过真实模型的错误。** 抓到的全是
-语料里人为植入的 bug。所以这些机制全是按文档推演建的，不是被真实失败逼出来的。
-
-删掉的：保留集 + 轮换、分支覆盖 100% 门槛、模糊测试、确定性、变异测试、后置断言、
-探针、QUARANTINE 隔离、版本三级排序、`net_savings` 成本核算。3647 → 2451 行，
-验证一次从 727ms 降到 34ms，可调参数从 21 个降到 4 个。
-
-**最可能需要加回来的是保留集**：把一部分用例藏起来不给修复循环看，挡的是
-"模型对着可见用例写 `if input == X: return Y`"。它不花额外 token，`verify.py`
-顶部记着这条。
-
-### 已知缺口
-
-- **只有 Haiku 4.5 一个模型，每个需求最多 3 轮。** 上面所有数字都建立在这个样本上。
-  换个模型、换个温度、多跑几轮会不会出现算错的用例，不知道。
-- **含糊需求上只有定性结论。** `assumes` 改完之后模型会声明假设了，但"声明的
-  假设准不准""会不会漏掉该声明的"，只看了三个需求一轮，没有量化。
-- **12 个需求都是我写的。** 我写需求时知道自己要测什么，会不自觉地写清楚。
-  真实需求是别人写的，含糊程度不一样。
-- **参考实现和我共享同一种读法。** 审计用的 oracle 是我按需求原文直译的 ——
-  如果模型和我用同一种方式误读了需求，这个审计看不出来。需求是我写的，
-  所以这里"我的读法就是规格"，但换成别人的需求就不成立了。
-- **沙箱是正确性沙箱，不是安全沙箱。** 受限 builtins + AST 白名单 + rlimit +
-  内存看门狗挡得住事故和随手的逃逸，挡不住认真的攻击者。macOS 直接忽略
-  `RLIMIT_AS`，内存上限靠父进程轮询 RSS。
-- **`datetime.strptime` 用不了**（见上）。同类的"标准库内部惰性 import"可能还有别的，
-  目前只撞到这一个。
-- **走 CLI 的 token 数是估的。** `claude -p` 每次带 ~22.2k 固定开销（Claude Code
-  自己的系统提示和工具定义），已经扣掉，但这个常数会随 CLI 版本变。
-- **补用例静默失败过一次。** 12 轮里有 1 轮补出 0 条（仍然编译成功且 200/200 正确）。
-  当时没记原因，现在 `propose_error` 会记下来了，还没再复现过。
-
-| 文档 | 内容 |
-| --- | --- |
-| [docs/design.md](docs/design.md) | 主设计（v0.2）——接口、架构、缓存、沙箱、路线图 |
-| [docs/correctness.md](docs/correctness.md) | 正确性与测试——**系统能否成立的关键** |
-| [docs/tracing-frontend.md](docs/tracing-frontend.md) | 自动发现重复并触发编译的前端（M4，未启动） |
-| `docs/adr/` | 架构决策记录（待填） |
-
-## 代码
+## The code
 
 ```
 src/agentjit/
-  jit.py            产品面：compile / get_code / call / search / inspect
-  propose.py        让模型把用例补完整 —— 先于代码，单独一次调用
-  prompts.py        写代码和写用例两套 prompt，需求放在不可信数据区
-  synth.py          合成循环：写 → 验 → 结构化反馈 → 再写，至多三次
-  verify.py         静态检查 + 跑用例。就这两道
-  static_check.py   AST 白名单 —— 最便宜的一道，不过的根本不进沙箱
-  sandbox.py        子进程执行 + 内存看门狗（父进程侧）
-  _child.py         沙箱子进程，必须自包含
-  infer.py          从例子反推 schema（会分辨"记录"和"映射"）
-  registry.py       落盘：以用例为中心，多版本，按名字取
-  lookup.py         三级查找 —— 检索只缩候选集，判定靠复验
-  runtime.py        调用：入参 guard → 沙箱 → 返回 guard。纯读
-  llm.py            生成后端：直连 API / 走本机 claude CLI / 回放脚本
-tests/corpus/       6 个语料用例，每个针对一道关卡
-examples/           两个 demo 需求，给 `agentjit compile` 用
+  jit.py            the product surface: compile / get_code / call / search / inspect
+  propose.py        get the model to write the cases out — before the code, separate call
+  prompts.py        the two prompts; the requirement sits in an untrusted data region
+  synth.py          the synthesis loop: write → verify → structured feedback → write again
+  verify.py         the static check plus running the cases. Those two, and no more
+  static_check.py   the AST allowlist — the cheapest gate; failing it means no sandbox
+  sandbox.py        subprocess execution plus the parent-side memory watchdog
+  _child.py         the sandbox child; must be self-contained
+  infer.py          infer a schema from examples (it can tell a record from a mapping)
+  registry.py       storage: organised around the test set, versioned, fetched by name
+  lookup.py         three-level lookup — retrieval narrows, re-verification decides
+  runtime.py        calling: input guard → sandbox → return guard. A pure read
+  llm.py            backends: the API, the local claude CLI, a scripted replay
+tests/corpus/       6 corpus cases, one per gate
+tools/              the two audits, plus the demo capture and the SVG builder
+examples/           two demo requirements for `agentjit compile`
 ```
 
-## 从哪读起
+| Document | Contents |
+| --- | --- |
+| [docs/design.md](docs/design.md) | the main design (v0.2) — interface, architecture, caching, sandbox, roadmap |
+| [docs/correctness.md](docs/correctness.md) | correctness and testing — **what decides whether this stands up** |
+| [docs/tracing-frontend.md](docs/tracing-frontend.md) | the front end that spots repetition and triggers a compile (M4, not started) |
+| [NEXT.md](NEXT.md) | what to do next, and what is deliberately not being done |
 
-1. [design §4 接口设计](docs/design.md#4-接口设计) — 产品面，四个操作，其余都是实现细节
-2. [correctness §2 Oracle 分层](docs/correctness.md#2-oracle-分层) — 五层判据，哪些不需要标准答案
-3. [correctness §4 变形性质](docs/correctness.md#4-t2--变形性质一条性质抵一万个用例) — 一条性质抵一万个用例
-4. [correctness §8 测试集够不够强](docs/correctness.md#8-测试集够不够强) — 跑过了到底能说明什么
-5. [design §7.2 Facade RPC](docs/design.md#72-facade-rpc沙箱里不开洞) — 安全模型里最重要的结构决策
-6. [design §10 路线图](docs/design.md#10-路线图) — M0/M1 是立项验证
+### Where to start reading
+
+1. `src/agentjit/propose.py`, the header — one model writing both the code and its tests is
+   circular; which part of that each mitigation solves, and which part cannot be solved
+2. `src/agentjit/verify.py`, the header — which five gates were cut, why, and which one is
+   most likely to come back
+3. `tools/audit_tests.py`, the header — the audit protocol; the reference has to be written
+   **before** any generated case is seen, or it starts making excuses for the model
+4. `src/agentjit/lookup.py`, the header — why retrieval is allowed to be crude, and where
+   being crude does not matter
