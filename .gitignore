@@ -17,5 +17,5 @@ build/
 *.trace.jsonl
 .venv/
 
-# the raw transcript from tools/capture_demo.sh; docs/demo.txt is the trimmed one
-docs/demo.full.txt
+# the raw capture from tools/capture_demo.sh; docs/demo.txt is the curated one
+docs/demo.raw.txt
