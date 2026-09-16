@@ -1,85 +1,101 @@
-# 接下来做什么
+# What to do next
 
-按优先级排。每项写清楚**为什么做**、**怎么做**、**做完怎么算完成** —— 没有完成判据的
-条目不该开工。
+In priority order. Each item says **why**, **how**, and **what counts as done** — an item
+with no completion criterion should not be started.
 
-现状见 [README](README.md)。一句话：**一段话 → 补用例 → 写代码 → 验 → 按名字取**。
-6 个需求 × 2 轮端到端，产物对独立写的参考实现 2400 个随机输入零分歧。
-2451 行，102 个单测 + 6 个语料。
-
----
-
-## 0. 换个模型，换个人写需求
-
-到目前为止所有数字都压在一个样本上：**Haiku 4.5，需求是我写的**。
-
-已经量到的（`tools/audit_tests.py` / `tools/audit_e2e.py`，都可重跑）：
-
-- 6 个需求 × 8 条生成用例，期望值对参考实现 **48/48 一致**，我埋的坑 **18/18 全碰到**
-- 6 个需求 × 2 轮编译，产物对参考实现 **2400 个随机输入零分歧**
-
-这两个数好看，但**审计的 oracle 是我写的参考实现，需求也是我写的**。我写需求时
-知道自己要测什么，会不自觉地写清楚；参考实现又和我共享同一种读法。这两件事一起
-构成了系统性偏差。
-
-怎么做：
-
-- 换模型：同样 6 个需求用 Sonnet / Opus 各跑一轮，看生成用例的期望值是否仍然 48/48。
-  **更有价值的是交叉验**：拿 A 模型生成的用例去验 B 模型写的代码，分歧点就是
-  需求没说清的地方
-- 换出题人：找 5 个**不是我写的**需求（从真实项目里抄），重跑两个审计
-- 量化含糊需求：现在只有定性结论（模型会声明假设了）。要的是数 ——
-  N 个含糊需求 × M 个没说清的点，声明了几个、漏了几个、声明得准不准
-
-**完成判据**：一个换了模型、换了出题人之后仍然站得住的数字；或者一个明确的
-"换了就不行"的结论。
+For the current state see the [README](README.md). In one line: **a sentence → generate the
+cases → write the code → verify → fetch it back by name.**
 
 ---
 
-## 1. 场景还是窄
+## 0. A different model, and requirements written by someone else
 
-从 4 个任务加到了 10 个（分组求和、分档收费、统计行数、排名次、日志解析、
-工作日计数、嵌套压平、分组取前 N、带状态聚合、金额分摊）—— 但全是小的纯数据变换，
-而且都在 20 行代码以内。
+Every number so far rests on one sample: **Claude Haiku 4.5, with requirements written by
+the person running the audit**.
 
-没碰过的形态：需要辅助函数的、有递归的、输入上千条要考虑复杂度的、
-输出结构和输入完全不同的。
+What has been measured (`tools/audit_tests.py`, `tools/audit_traps.py`,
+`tools/audit_e2e.py` — all re-runnable):
 
-**完成判据**：10 个以上"一眼看不出怎么写"的需求跑过一遍，记成功率和失败卡在哪。
+- 6 requirements × 8 generated cases, expectations **48/48 in agreement** with the
+  reference, and **18/18 of the planted traps** exercised by at least one case
+- 6 requirements compiled, the result agreeing with the reference on **every random input**
+
+Those numbers look good, but **the audit's oracle and the requirements come from the same
+person**. Someone writing a requirement while knowing what they intend to test writes more
+clearly than they realise, and their reference implementation shares their reading. Those
+two together are a systematic bias.
+
+How:
+
+- **Change the model**: run the same 6 requirements through Sonnet and Opus, one round
+  each, and see whether the generated expectations still agree 48/48. **The more valuable
+  variant is a cross-check**: verify model B's code with model A's cases, because every
+  disagreement is a place the requirement failed to say something.
+- **Change the author**: find 5 requirements **written by someone else** (lifted from a
+  real project) and re-run both audits.
+- **Quantify vague requirements**: there is only a qualitative result today (the model does
+  declare its assumptions). What is wanted is a number — N vague requirements × M unsaid
+  decisions, how many were declared, how many missed, how accurate the declarations were.
+
+**Done when**: there is a number that still holds up under a different model and a
+different author — or a clear conclusion that it does not.
 
 ---
 
-## 2. 需要标定的数字
+## 1. The scenarios are still narrow
 
-剩下的不多了，砍完之后只有 4 个：
+Up from 4 tasks to 10 (group and sum, tiered fees, counting rows, ranking, log parsing,
+counting working days, flattening nested data, top N per group, stateful aggregation,
+splitting an amount) — but every one is a small pure data transformation, and every one
+fits in under 20 lines.
 
-| 参数 | 现值 | 问题 |
+Shapes never touched: anything needing helper functions, anything recursive, anything where
+a thousand input rows make complexity matter, anything whose output shape bears no
+resemblance to its input.
+
+**Done when**: 10 or more requirements where the implementation is not obvious at a glance
+have been run, with the success rate and the failing gate recorded.
+
+---
+
+## 2. Numbers that need calibrating
+
+Not many left; after the cull there are four:
+
+| Parameter | Current | The question |
 | --- | --- | --- |
-| `gen_tests` | 8 | 补几条。多了费 token 也更容易出错用例，少了判据不够厚 |
-| `max_attempts` | 3 | 15 轮里只有 1 个需求用到第 2、3 次（而且根因是沙箱限制，已修）。真正需要多轮的情况还没见到 |
-| `lookup.MIN_SIMILARITY` | 0.20 | 真改写量到 0.29~0.41，不相干的 0.03，中间很空 —— 但只测了两个需求 |
-| `llm.CLI_OVERHEAD_TOKENS` | 22200 | `claude -p` 每次带的固定开销，量的是一个空任务。会随 CLI 版本变 |
+| `gen_tests` | 8 | how many cases to write. More costs tokens and raises the chance of a wrong one; fewer leaves the criteria thin |
+| `max_attempts` | 3 | across 15 rounds only one requirement ever reached attempt 2 or 3 — and the root cause was a sandbox limitation, since fixed. A case that genuinely needs several rounds has not been seen |
+| `lookup.MIN_SIMILARITY` | 0.20 | **script-dependent, so it cannot separate anything on its own.** Chinese: unrelated ~0.03, genuine rewrites 0.29-0.41. English: unrelated 0.21-0.28 (the bigram floor alone), rewrites 0.51-0.54. Either normalise against a per-language baseline, or accept it as a pure cost knob and say so |
+| `llm.CLI_OVERHEAD_TOKENS` | 22200 | the fixed overhead `claude -p` carries on every call, measured against an empty task. It moves with the CLI version |
 
 ---
 
-## 3. 明确**不做**的
+## 3. Explicitly not doing
 
-- **把砍掉的关卡加回来** —— 除非有真实失败要求它。保留集是唯一一个我会主动
-  加回来的，条件是第 0 项发现模型对着可见用例写死答案
-- **容器 / microVM 沙箱** —— 现在的子进程沙箱是**正确性沙箱不是安全沙箱**，
-  在跑自己的代码这个前提下够用。接外部不可信来源之前必须升级
-- **能力注入（http / fs / tools）** —— 纯函数覆盖面比直觉大，先把纯函数走通
-- **向量检索** —— 现在全库线性扫，registry 大到扫不动再说。它是**性能**优化，
-  不是正确性机制，换的时候别把复验一起"优化"掉
+- **Putting the cut gates back** — not unless a real failure demands it. The hold-out split
+  is the only one that would go back voluntarily, and the trigger for that is item 0 finding
+  the model writing answers against the cases it can see
+- **A container or microVM sandbox** — the current subprocess sandbox is a **correctness
+  sandbox, not a security sandbox**, which is enough while it is running your own code. It
+  has to be upgraded before it touches an untrusted source
+- **Capability injection (http / fs / tools)** — pure functions cover more ground than
+  intuition suggests; get pure functions right first
+- **Vector retrieval** — the whole registry is scanned linearly today; revisit when it
+  becomes too big to scan. It is a **performance** optimisation, not a correctness
+  mechanism, and whoever swaps it in must not "optimise away" the re-verification with it
 
 ---
 
-## 开工前先读
+## Read before starting
 
-1. `src/agentjit/propose.py` 的开头 —— 模型自己写测试验自己写的代码是循环论证，
-   三条缓解各解决了哪一部分，以及哪一部分解决不了
-2. `src/agentjit/verify.py` 的开头 —— 砍掉了哪五道关卡，为什么，以及最可能要
-   加回来的是哪个
-3. `tools/audit_tests.py` 的开头 —— 审计的协议。参考实现必须在看到生成用例**之前**
-   写好，否则会不自觉地为模型的答案找理由
-4. `src/agentjit/lookup.py` 的开头 —— 为什么检索可以很土，以及它土在哪里不要紧
+1. The header of `src/agentjit/propose.py` — one model writing both the code and the tests
+   that judge it is circular; which part of that each of the three mitigations solves, and
+   which part cannot be solved
+2. The header of `src/agentjit/verify.py` — which five gates were cut, why, and which one is
+   most likely to come back
+3. The header of `tools/audit_tests.py` — the audit protocol. The reference implementation
+   has to be written **before** any generated case is seen, or it starts finding reasons why
+   the model's answer was fine
+4. The header of `src/agentjit/lookup.py` — why retrieval is allowed to be crude, and where
+   being crude does not matter

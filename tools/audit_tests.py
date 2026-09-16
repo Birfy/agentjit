@@ -336,9 +336,14 @@ def audit(t: Task, n: int = 8) -> dict:
             want, err = None, f"{type(ex).__name__}: {ex}"
         rows.append({"input": e.input, "model": e.output, "reference": want,
                      "note": e.note, "agree": err is None and want == e.output,
+                     # An assumption the model made where the requirement said nothing.
+                     # Worth recording: a case resting on one is not a case anybody can be
+                     # said to be wrong about, so it changes how a failure is attributed.
+                     "assumes": e.assumes,
                      "ref_error": err})
     return {"key": t.key, "shape": t.shape, "requirement": t.requirement,
             "proposed": len(p.examples), "dropped": len(p.dropped),
+            "assumed": len(p.assumed),
             "error": p.error, "rows": rows,
             "tokens": [p.input_tokens, p.output_tokens]}
 
@@ -353,12 +358,15 @@ def main(argv):
         total += len(r["rows"])
         agree += ok
         print(f"\n=== {r['key']} ({r['shape']})   wrote {r['proposed']}, "
-              f"dropped {r['dropped']}   agree {ok}/{len(r['rows'])} ===")
+              f"dropped {r['dropped']}, {r['assumed']} assumed   "
+              f"agree {ok}/{len(r['rows'])} ===")
         if r["error"]:
             print("  " + r["error"])
         for x in r["rows"]:
             if x["agree"]:
                 print(f"  agree      {(x['note'] or '')[:56]}")
+                if x["assumes"]:
+                    print(f"     ! assumes {x['assumes'][:80]}")
             else:
                 print(f"  DISAGREE   {(x['note'] or '')[:56]}")
                 print(f"     input      {json.dumps(x['input'], ensure_ascii=False)[:150]}")

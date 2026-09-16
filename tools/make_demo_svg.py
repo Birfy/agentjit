@@ -34,7 +34,7 @@ TYPE_PER_CHAR = 0.035
 AFTER_COMMAND = 0.35                    # the pause between hitting enter and output
 PER_OUTPUT_LINE = 0.10
 PAUSE = 1.1                             # an explicit `~~~`
-TAIL = 3.0                              # how long the final frame is held
+TAIL = 4.0                              # how long the final frame is held
 
 # --- colours (a dark terminal; readable on both GitHub themes) -----------------
 BG = "#11151c"
@@ -104,11 +104,19 @@ def schedule(steps: list[tuple[str, str]]) -> tuple[list[dict], float]:
 
 
 def animate_opacity(t0: float, total: float) -> str:
-    """Invisible, then visible from t0 until the loop restarts."""
+    """Invisible, then visible from t0 until the loop restarts.
+
+    Everything is driven off one master timeline — `begin="0s"`, `dur=total`,
+    `repeatCount="indefinite"` — with the moment encoded in `keyTimes`. Scheduling each
+    line with its own `begin` and `fill="freeze"` instead looks equivalent and is not: a
+    frozen animation never lets go, so the second loop shows the first loop's final frame.
+    And `keyTimes` **must end at 1**, or Chrome discards the whole animation and the
+    element simply never appears.
+    """
     k = max(0.0, min(1.0, t0 / total))
     return (f'<animate attributeName="opacity" begin="0s" dur="{total:.2f}s" '
             f'repeatCount="indefinite" calcMode="discrete" '
-            f'values="0;1" keyTimes="0;{k:.5f}"/>')
+            f'values="0;1;1" keyTimes="0;{k:.5f};1"/>')
 
 
 def render(lines: list[dict], total: float, title: str) -> str:
@@ -136,13 +144,15 @@ def render(lines: list[dict], total: float, title: str) -> str:
         w = len(text) * CHAR_W
         x0 = PAD_X + 2 * CHAR_W
         cid = f"t{i}"
+        k0 = item["t"] / total
+        k1 = (item["t"] + item["dur"]) / total
+        loop = f'begin="0s" dur="{total:.2f}s" repeatCount="indefinite"'
+
         clips.append(
             f'<clipPath id="{cid}"><rect x="{x0:.1f}" y="{y - LINE_H:.1f}" '
             f'height="{LINE_H * 1.6:.1f}" width="0">'
-            f'<animate attributeName="width" begin="{item["t"]:.2f}s" '
-            f'dur="{item["dur"]:.2f}s" from="0" to="{w:.1f}" fill="freeze"/>'
-            f'<animate attributeName="width" begin="{total:.2f}s" dur="0.01s" '
-            f'to="0" fill="freeze" repeatCount="indefinite"/></rect></clipPath>')
+            f'<animate attributeName="width" {loop} values="0;0;{w:.1f};{w:.1f}" '
+            f'keyTimes="0;{k0:.5f};{k1:.5f};1"/></rect></clipPath>')
         body.append(
             f'<text x="{PAD_X:.1f}" y="{y:.1f}" fill="{PROMPT}" opacity="0">$'
             f'{animate_opacity(item["t"], total)}</text>')
@@ -152,12 +162,11 @@ def render(lines: list[dict], total: float, title: str) -> str:
         body.append(
             f'<rect x="{x0:.1f}" y="{y - FONT_SIZE + 2.5:.1f}" width="{CHAR_W:.1f}" '
             f'height="{FONT_SIZE:.1f}" fill="{CMD}" opacity="0">'
-            f'<animate attributeName="x" begin="{item["t"]:.2f}s" '
-            f'dur="{item["dur"]:.2f}s" from="{x0:.1f}" to="{x0 + w:.1f}" fill="freeze"/>'
-            f'<animate attributeName="opacity" begin="0s" dur="{total:.2f}s" '
-            f'repeatCount="indefinite" calcMode="discrete" values="0;0.85;0" '
-            f'keyTimes="0;{item["t"] / total:.5f};'
-            f'{(item["t"] + item["dur"]) / total:.5f}"/></rect>')
+            f'<animate attributeName="x" {loop} '
+            f'values="{x0:.1f};{x0:.1f};{x0 + w:.1f};{x0 + w:.1f}" '
+            f'keyTimes="0;{k0:.5f};{k1:.5f};1"/>'
+            f'<animate attributeName="opacity" {loop} calcMode="discrete" '
+            f'values="0;0.85;0;0" keyTimes="0;{k0:.5f};{k1:.5f};1"/></rect>')
 
     dots = "".join(
         f'<circle cx="{22 + k * 18}" cy="22" r="5.5" fill="{c}"/>'

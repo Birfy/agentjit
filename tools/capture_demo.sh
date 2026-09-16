@@ -13,14 +13,24 @@ OUT="${1:-docs/demo.txt}"
 RAW="$(mktemp -d)"
 
 rm -rf "$HOME_DIR"
+# Echo the command the way a person would have typed it: an argument carrying spaces or
+# braces gets its quotes back, so the transcript is something you can paste.
+show() {
+  local out="" a
+  for a in "$@"; do
+    case "$a" in *[\ \{\}\"]*) out="$out '$a'" ;; *) out="$out $a" ;; esac
+  done
+  printf '$ agentjit%s\n' "$out" >> "$RAW/log"
+}
+
 run() {
-  printf '$ agentjit %s\n' "$*" >> "$RAW/log"
+  show "$@"
   AGENTJIT_HOME="$HOME_DIR" python3 -m agentjit.cli "$@" 2>&1 | tee -a "$RAW/log" >/dev/null
   printf '~~~\n' >> "$RAW/log"
 }
 
 run compile examples/rank.json --name rank
-run call rank '{"records":[{"name":"zoe","score":7},{"name":"amy","score":9},{"name":"bob","score":7}]}'
+run call rank '{"records":[{"name":"zoe","score":7},{"name":"amy","score":9}]}'
 run list
 
 cp "$RAW/log" "$RAW/full.txt"
