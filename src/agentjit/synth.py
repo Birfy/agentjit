@@ -116,7 +116,8 @@ def compile_function(
     code, report, why = _repair(requirement, spec, examples, client, sb, th,
                                 max_attempts, attempts)
     if not code:
-        return SynthResult(False, spec, attempts=attempts, reason=why)
+        last = attempts[-1].code if attempts else ""
+        return SynthResult(False, spec, last, report, attempts, reason=why)
     return SynthResult(True, spec, code, report, attempts, review=review_flags(code))
 
 
@@ -126,8 +127,12 @@ def _repair(requirement, spec, examples, client, sb, th, max_attempts, attempts)
     返回 (code, report, failure_reason)。通过的那一次的报告直接带出去 ——
     早先外面还要再验一遍（那时外面跑的是带保留集和变异测试的终审，和循环里
     那道不是同一回事）。现在两边一模一样，再验一遍纯属多跑一次沙箱。
+
+    **失败时也带报告出去**：上面那层要看最后一次挂在哪几条用例上，才能判断
+    该怪代码还是怪用例（jit.py 的 `_blame`）。只给一句 reason 的话，
+    那个判断就做不了了。
     """
-    feedback, last = "", None
+    feedback, last, last_rep = "", None, None
     for n in range(1, max_attempts + 1):
         user = build_user(requirement, examples, spec.param_schema, spec.return_schema, feedback)
         try:
@@ -155,8 +160,8 @@ def _repair(requirement, spec, examples, client, sb, th, max_attempts, attempts)
         attempts.append(Attempt(n, code, g.name, g.summary,
                                 resp.input_tokens, resp.output_tokens))
         feedback = render_feedback(code, g.name, g.summary, g.detail)
-        last = g.name
+        last, last_rep = g.name, rep
 
-    return "", None, (f"{max_attempts} 次尝试都没通过，最后卡在 {last}。"
+    return "", last_rep, (f"{max_attempts} 次尝试都没通过，最后卡在 {last}。"
                       "失败本身是有信息的 —— 多半说明这事不适合用代码做，"
                       "或者需求/例子之间本身不自洽。")

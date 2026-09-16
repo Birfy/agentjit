@@ -42,14 +42,20 @@ def _schema_ok(value: Any, schema: dict) -> str:
 
 def _failures(run: RunResult, examples: list[Example]) -> list[dict]:
     """不通过的用例。反馈必须结构化 —— 见 docs/design.md §6.3。
-    "输入 X 期望 Y 实际 Z" 能让模型一次修对，"没通过，再试试"只会让它随机重写。"""
+    "输入 X 期望 Y 实际 Z" 能让模型一次修对，"没通过，再试试"只会让它随机重写。
+
+    每条带上 `origin`：调用方给的用例挂了就是代码错了，自动生成的用例挂了则
+    **可能是用例本身错的**。这个区别不在这里判，但判它的人需要这个字段
+    （见 jit.py 的 `_blame`）。
+    """
     bad = []
     for i, (ex, r) in enumerate(zip(examples, run.results)):
         if not r.ok:
-            bad.append({"i": i, "input": ex.input, "expected": ex.output,
-                        "actual": None, "error": r.error})
+            bad.append({"i": i, "origin": ex.origin, "input": ex.input,
+                        "expected": ex.output, "actual": None, "error": r.error})
         elif not deep_equal(r.value, ex.output):
-            bad.append({"i": i, "input": ex.input, "expected": ex.output, "actual": r.value})
+            bad.append({"i": i, "origin": ex.origin, "input": ex.input,
+                        "expected": ex.output, "actual": r.value})
     return bad
 
 

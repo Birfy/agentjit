@@ -2,6 +2,10 @@
 
 说到底就三件事：**一段话进去，长出代码，之后按名字拿回来。**
 
+中间还有一步：`compile_function` 会**先让模型把测试用例写完整**，再让它写代码。
+先后顺序是设计的一部分，理由见 `propose.py` 顶部 —— 一句话说就是，写测试的时候
+代码还不存在，代码就没法反过来影响测试。
+
     compile_function("按 score 排名次…", examples, name="rank")  → 入库
     get_code("rank")                                            → 源码
     call_function("rank", {"records": [...]})                   → 结果
@@ -25,6 +29,7 @@ from typing import Any
 
 from .llm import LLMClient
 from .lookup import Candidate, Lookup, find, search
+from .propose import Proposal, propose_tests
 from .registry import Function, NotCacheable, Registry
 from .runtime import CallOutcome, Runtime, call_function  # noqa: F401  产品面的一员
 from .sandbox import Sandbox
@@ -49,6 +54,7 @@ class CompileResult:
     report: Report | None = None
     lookup: Lookup | None = None
     synth: SynthResult | None = None
+    proposal: Proposal | None = None
     reason: str = ""
     review: list[str] = field(default_factory=list)
 
@@ -58,12 +64,20 @@ class CompileResult:
 
     @property
     def tokens(self) -> tuple[int, int]:
-        return (self.synth.input_tokens, self.synth.output_tokens) if self.synth else (0, 0)
+        """合成花掉的 token，含补用例那一次调用。"""
+        i = o = 0
+        if self.proposal:
+            i, o = self.proposal.input_tokens, self.proposal.output_tokens
+        if self.synth:
+            i, o = i + self.synth.input_tokens, o + self.synth.output_tokens
+        return i, o
 
     def render(self) -> str:
         lines = []
         if self.lookup:
             lines.append(self.lookup.render())
+        if self.proposal:
+            lines.append(self.proposal.render())
         if self.synth:
             lines.append(self.synth.render())
         tag = {"hit": "命中缓存，没花 token",
@@ -92,6 +106,7 @@ def compile_function(
     cache: str = "auto",              # auto | force_new | ephemeral
     model: str = "",
     name: str = "",                   # 人起的名字，之后靠它取代码
+    gen_tests: int = 8,               # 先让模型补几条用例；0 = 只用调用方给的
     entry: str = "solve",
     **synth_kw: Any,
 ) -> CompileResult:
@@ -101,6 +116,10 @@ def compile_function(
       - `auto`      先查后合成（默认）
       - `force_new` 跳过查找，强制合成一个新版本
       - `ephemeral` 合成一次就扔，不落盘。适合明知只用一次的需求
+
+    `gen_tests`：先单独调一次模型，让它把用例补完整，再拿补完的用例去合成和验收。
+    设成 0 就只用调用方给的那几条。代价是多一次调用；收益是判据变厚 ——
+    但**不是变可信**，见 `propose.py`。
     """
     reg = registry or Registry()
     sb = sandbox or Sandbox()
@@ -122,35 +141,68 @@ def compile_function(
             "缓存没命中，合成需要一个 LLM 客户端。"
             "只想查不想合成的话用 search_functions()。")
 
-    r = synthesize(requirement, examples, client=client, sandbox=sb,
+    # 先补用例，再写代码 —— 顺序是设计的一部分，见 propose.py
+    prop = propose_tests(requirement, examples, client=client, n=gen_tests) \
+        if gen_tests > 0 else None
+    full = examples + (prop.examples if prop else [])
+
+    r = synthesize(requirement, full, client=client, sandbox=sb,
                    thresholds=thresholds, entry=entry, **synth_kw)
     # 需求换了说法但本质是同一个函数时，新合成的会落在**本次**的 spec_hash 下。
     # 这不是 bug：两条说法各自留一份 hash，下次两边都能 L1 命中。
     state = "reused_with_new_version" if (lk and lk.stale) else "miss"
     if not r.ok:
         return CompileResult(status="failed", cache=state, spec=r.spec,
-                             report=r.report, lookup=lk, synth=r,
+                             report=r.report, lookup=lk, synth=r, proposal=prop,
                              level=r.report.level if r.report else None,
-                             reason=r.reason, review=r.review)
+                             reason=_blame(r), review=r.review)
 
     if cache == "ephemeral":
         return CompileResult(status="ready", cache=state, spec=r.spec, synth=r,
                              lookup=lk, level=r.report.level, report=r.report,
+                             proposal=prop,
                              reason="cache=ephemeral：没落盘，这个实现用完就没了。",
                              review=r.review)
 
     try:
-        fn = reg.put(requirement, r.spec, r.code, r.report, examples, model=model,
-                     attempts=len(r.attempts), input_tokens=r.input_tokens,
-                     output_tokens=r.output_tokens, name=name)
+        # 存的是**补完之后**的用例：生成的那几条也进测试集，标着 origin=generated，
+        # 下次换模型重新生成时它们一起当验收标准。
+        i, o = (prop.input_tokens if prop else 0), (prop.output_tokens if prop else 0)
+        fn = reg.put(requirement, r.spec, r.code, r.report, full, model=model,
+                     attempts=len(r.attempts), input_tokens=r.input_tokens + i,
+                     output_tokens=r.output_tokens + o, name=name)
     except NotCacheable as e:
         return CompileResult(status="ready", cache=state, spec=r.spec, synth=r,
                              lookup=lk, level=r.report.level, report=r.report,
-                             reason=f"未入库：{e}", review=r.review)
+                             proposal=prop, reason=f"未入库：{e}", review=r.review)
 
     return CompileResult(status="ready", cache=state, spec=r.spec, synth=r, lookup=lk,
+                         proposal=prop,
                          name=fn.name, handle=fn.handle, version=fn.versions[-1].name,
                          level=r.report.level, report=r.report, review=r.review)
+
+
+def _blame(r: SynthResult) -> str:
+    """失败该算谁的。
+
+    只挂在**自动生成**的用例上时，结论是有歧义的：可能代码错了，也可能那条用例
+    的期望值就是错的（模型算错一个边界是常事）。这种情况必须原样摆给调用方裁决，
+    不能说成"代码有 bug" —— 拿一条错用例否决正确代码，比漏个 bug 难查得多。
+    """
+    g = r.report.gate("examples") if r.report else None
+    fails = (g.detail.get("failures") or []) if g else []
+    if not fails or any(f.get("origin", "caller") != "generated" for f in fails):
+        return r.reason
+    lines = ["代码通过了**你给的全部用例**，只挂在自动补的用例上 —— "
+             "所以说不准是代码错了还是用例错了：", ""]
+    for f in fails[:4]:
+        lines.append(f"  输入 {f['input']}")
+        lines.append(f"  期望 {f['expected']}（自动生成）")
+        lines.append(f"  实际 {f.get('error') or f.get('actual')}")
+        lines.append("")
+    lines.append("请裁决：期望值对的话这就是代码的 bug；期望值错的话，"
+                 "用 gen_tests=0 重编译，或者把正确的期望值补进 examples。")
+    return "\n".join(lines)
 
 
 def _bank_the_hit(reg: Registry, lk: Lookup, examples: list[Example],

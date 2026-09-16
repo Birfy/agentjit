@@ -174,6 +174,8 @@ def test_reverify_needs_examples_to_have_anything_to_say(reg, sb):
 
 
 # --- 串起来 ----------------------------------------------------------------
+# 下面几条传 gen_tests=0：它们验的是缓存路径，不是补用例。不关掉的话每个
+# ScriptedClient 都得多备一条回复，测试意图就被无关的脚本淹掉了。
 def test_second_compile_costs_no_tokens(reg, sb):
     client = ScriptedClient([fenced(SUM_CODE)])
     r = compile_function(SAME_THING[0], EXAMPLES, client=client, registry=reg, sandbox=sb)
@@ -206,7 +208,7 @@ def test_missing_the_cache_without_a_client_is_an_error_not_a_silent_none(reg, s
 def test_force_new_skips_the_lookup(reg, sb):
     client = ScriptedClient([fenced(SUM_CODE)])
     r = compile_function(SUM_REQ, EXAMPLES, client=client, registry=reg, sandbox=sb,
-                         cache="force_new")
+                         cache="force_new", gen_tests=0)
     assert r.ok and r.cache == "miss" and len(client.calls) == 1
     assert [v.name for v in reg.get(r.handle).versions] == ["v1", "v2"]
 
@@ -214,14 +216,14 @@ def test_force_new_skips_the_lookup(reg, sb):
 def test_ephemeral_runs_but_never_reaches_disk(reg, sb):
     client = ScriptedClient([fenced(RANK_CODE)])
     r = compile_function(RANK_REQ, RANK_EXAMPLES, client=client, registry=reg,
-                         sandbox=sb, cache="ephemeral")
+                         sandbox=sb, cache="ephemeral", gen_tests=0)
     assert r.ok and r.handle == "" and len(reg.all()) == 1
 
 
 def test_stale_l1_produces_a_new_version_of_the_same_function(reg, sb):
     """需求原文没变、例子变了 —— 这是同一个函数的新版本，不是新函数。"""
     r = compile_function(SUM_REQ, CORRECTED, client=ScriptedClient([fenced(ABS_CODE)]),
-                         registry=reg, sandbox=sb)
+                         registry=reg, sandbox=sb, gen_tests=0)
 
     assert r.ok and r.cache == "reused_with_new_version", r.render()
     assert len(reg.all()) == 1
