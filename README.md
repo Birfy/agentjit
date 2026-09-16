@@ -215,10 +215,10 @@ again".
 ## Four design claims
 
 - **Correctness rests on test cases, not on extra machinery.** There used to be five more
-  gates here — a hold-out split, branch coverage, fuzzing, mutation testing, post-assertions
-  — all answering "are your cases strong enough?". They are gone. That is **advice to the
-  caller, not a verdict**, and across the whole corpus none of the seven gates ever caught a
-  mistake a real model made.
+  gates — a hold-out split, branch coverage, fuzzing, determinism checking, mutation
+  testing — all of them answering "are your cases strong enough?" rather than "is this code
+  correct". They are gone. That question is **advice to the caller, not a verdict**, and
+  not one of them ever caught a mistake a real model made.
 - **`agentjit` writes the cases out in full; the trust still comes only from you.** See
   above.
 - **No holes in the sandbox.** Generated code has no I/O capability at all. Anything
@@ -264,13 +264,42 @@ python tools/audit_e2e.py
 ```
 
 Audit 1 checks the cases. This checks the final product, against the same references, on
-200 random inputs each.
+200 random inputs each. Two rounds, so the same requirement is compiled twice and the
+model's non-determinism shows up:
 
-<!-- E2E NUMBERS -->
+| across 6 requirements × 2 rounds | |
+| --- | --- |
+| compiled successfully | **12 / 12** |
+| passed on the first attempt, no repair round needed | **12 / 12** |
+| agreeing with the reference on every random input | **2400 / 2400** |
 
 Both directions have to be visible: **passing its own cases but failing here** means the
 generated cases were too weak and missed a real bug; **failing its own cases but passing
-here** means a generated case had a wrong expectation and condemned correct code.
+here** means a generated case had a wrong expectation and condemned correct code. Neither
+happened.
+
+#### The one time the repair loop was needed, it was the sandbox's fault
+
+Twelve for twelve on the first attempt means the repair loop never fired — which is only
+interesting because of what happened the first time this audit was run. Then, "count the
+working days" was the single requirement that got stuck, in both rounds: the first attempt
+failed `examples: 0/10` — every case — and only recovered after feedback.
+
+Digging in, **it was not the model's mistake.** The two versions were logically identical
+and differed by one API call: `datetime.datetime.strptime` cannot work inside the sandbox.
+It imports `_strptime` on first call, and the restricted builtins have no `__import__`.
+
+Making it work means putting an `__import__` into the sandbox's builtins, which collides
+head-on with "no holes in the sandbox" — saving one round of synthesis and wagering the
+whole boundary is a bad trade. So the prompt tells the model not to use it, and points at
+`datetime.date.fromisoformat` instead. Measured: **2-3 attempts down to 1, reproduced 3/3,
+wall clock halved.** A test in `tests/test_units.py` keeps the limitation and the prompt in
+step — the day the sandbox can run `strptime`, that test goes red, and that is the signal
+to delete the passage from the prompt.
+
+The lesson generalises past this one API: **a gate that fires on correct code costs more
+than a gate that misses a bug**, because nothing in the failure points at the real cause.
+It took reading two nearly identical implementations side by side to see it.
 
 ### Vague requirements are the real risk
 
@@ -310,6 +339,29 @@ What is stored is the **test set**; `code.py` is just an implementation that cur
 passes it. One `spec_hash` can hold several versions, and the newest wins. The cases belong
 to the spec rather than to a version — otherwise every regeneration copies them, the copies
 drift, and "a better model means a free regeneration" loses the thing it rests on.
+
+`agentjit inspect` shows the whole set, with where each case came from:
+
+```console
+$ agentjit inspect rank
+== rank ==   (fn_69889ea0d4c5)
+
+-- test cases (13) --
+  [caller]    {"records": [{"name": "alice", "score": 90}, … -> [{"name": "alice", "rank": 1}, …
+  [caller]    {"records": []} -> []
+  …
+  [generated] {"records": [{"name": "alice", "score": 10}, {… -> [{"name": "alice", "rank": 1}, …
+      ! rests on something the requirement did not say: Scores can be negative and follow
+        standard numerical ordering
+  …
+
+-- versions --
+ *v1  VERIFIED  2026-09-16T11:20:43  claude-haiku-4-5  1 attempt(s)  5017in/11773out
+```
+
+Five cases the caller wrote, eight the model added, and one of those flagged as resting on
+a decision the requirement never made. A year from now that flag is the only thing that can
+answer "why is this the expected value?".
 
 A call goes through three steps: **param schema → sandbox → return schema.** Both schemas
 are inferred from the shape of your examples, not guessed, and they are the same yardstick
@@ -373,7 +425,9 @@ all built by reasoning from a document, not forced into existence by a real fail
 
 Removed: hold-out splitting and rotation, the 100% branch-coverage threshold, fuzzing,
 determinism checking, mutation testing, post-assertions, probes, `QUARANTINED`
-sequestration, three-way version ranking, and `net_savings` accounting.
+sequestration, three-way version ranking, and `net_savings` accounting. The reasoning for
+each is in [docs/correctness.md](docs/correctness.md), which is kept as written — it is
+the argument any future addition has to beat.
 
 | | before | after |
 | --- | --- | --- |
@@ -415,6 +469,11 @@ was about.
 
 - **One model, three attempts maximum.** Every number here rests on Claude Haiku 4.5. What
   happens with a different model, a different temperature, or more rounds is unknown.
+- **The repair loop is currently untested by the audit.** Eighteen compiles in a row passed
+  on the first attempt, so nothing exercised it. `tests/test_synth.py` covers it with a
+  scripted client, but no *real* model has failed and recovered since the `strptime` fix.
+  That is a good problem, and it does mean `max_attempts = 3` is a number nothing has
+  pushed against.
 - **Vague requirements have only a qualitative result.** After the `assumes` change the
   model does declare its assumptions, but how *accurate* those declarations are, and how
   often it misses one it should have made, has not been quantified.
