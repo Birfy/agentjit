@@ -1,7 +1,10 @@
 [project]
-# The distribution is `agent-jit`; the import name and the CLI stay `agentjit`.
-# (`agentjit` was already taken on PyPI by an unrelated project.)
-name = "agent-jit"
+# `agentjit` is taken on PyPI by a different, actively published project whose wheel
+# also installs a top-level `agentjit` package — so sharing the name would not just be
+# confusing, the two would silently overwrite each other in site-packages. Everything
+# here is `jitagent`: the distribution, the import name and the CLI. The GitHub
+# repository keeps its original name.
+name = "jitagent"
 version = "0.0.1"
 description = "Compile a plain-text requirement into a reusable, verified, sandboxed function"
 readme = "README.md"
@@ -34,7 +37,7 @@ Issues = "https://github.com/Birfy/agentjit/issues"
 Changelog = "https://github.com/Birfy/agentjit/blob/main/CHANGELOG.md"
 
 [project.scripts]
-agentjit = "agentjit.cli:main"
+jitagent = "jitagent.cli:main"
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -43,10 +46,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# The corpus ships with the package so `agentjit selftest` works from a pip install,
+# The corpus ships with the package so `jitagent selftest` works from a pip install,
 # not only from a git checkout.
 [tool.setuptools.package-data]
-agentjit = ["corpus/*/*"]
+jitagent = ["corpus/*/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

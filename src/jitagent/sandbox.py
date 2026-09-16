@@ -115,7 +115,7 @@ class Sandbox:
         mem_mb: int = 512,
     ) -> RunResult:
         t0 = time.perf_counter()
-        with tempfile.TemporaryDirectory(prefix="agentjit-") as td:
+        with tempfile.TemporaryDirectory(prefix="jitagent-") as td:
             code_path = Path(td) / "generated.py"
             code_path.write_text(source)
             job = json.dumps({

@@ -2,7 +2,7 @@
 
 Layout:
 
-    $AGENTJIT_HOME/registry/<spec_hash>/
+    $JITAGENT_HOME/registry/<spec_hash>/
         spec.json     name, the requirement text, the inferred schemas, the entry point
         tests.json    the test cases — correctness rests on these, so they are the
                       main asset here
@@ -43,7 +43,7 @@ CACHEABLE = (Level.VERIFIED,)
 
 
 def home() -> Path:
-    return Path(os.environ.get("AGENTJIT_HOME") or Path.home() / ".agentjit")
+    return Path(os.environ.get("JITAGENT_HOME") or Path.home() / ".jitagent")
 
 
 def _canon(value: Any) -> str:

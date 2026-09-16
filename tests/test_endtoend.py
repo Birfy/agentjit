@@ -5,9 +5,9 @@ is connected, not "how many attempts Haiku really needs".
 """
 import pytest
 
-from agentjit import Example, Registry, Runtime, Sandbox, get_code
-from agentjit.llm import ScriptedClient
-from agentjit.synth import compile_function
+from jitagent import Example, Registry, Runtime, Sandbox, get_code
+from jitagent.llm import ScriptedClient
+from jitagent.synth import compile_function
 
 REQ = ("Group rows by type and sum the amounts, returning {type: total}. "
        "An amount may carry a currency symbol and thousands separators; "

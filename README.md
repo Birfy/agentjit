@@ -1,17 +1,17 @@
 <div align="center">
 
-# agentjit
+# jitagent
 
 **Stop your agent re-deriving the same function 200 times. Compile it once.**
 
 [![CI](https://github.com/Birfy/agentjit/actions/workflows/ci.yml/badge.svg)](https://github.com/Birfy/agentjit/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/agent-jit?color=3775a9&logo=pypi&logoColor=white)](https://pypi.org/project/agent-jit/)
+[![PyPI](https://img.shields.io/pypi/v/jitagent?color=3775a9&logo=pypi&logoColor=white)](https://pypi.org/project/jitagent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![corpus](https://img.shields.io/badge/corpus-6%2F6-5ac489)](src/agentjit/corpus/)
+[![corpus](https://img.shields.io/badge/corpus-6%2F6-5ac489)](src/jitagent/corpus/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![status](https://img.shields.io/badge/status-working%20prototype-e0af68)](#known-gaps)
 
-<img src="docs/demo.svg" alt="agentjit: compile a requirement, call it, list the registry" width="100%">
+<img src="docs/demo.svg" alt="jitagent: compile a requirement, call it, list the registry" width="100%">
 
 </div>
 
@@ -19,16 +19,16 @@
 <summary>The same session as text (it is a real transcript — <code>tools/capture_demo.sh</code> produced it)</summary>
 
 ```console
-$ agentjit compile examples/rank.json --name rank
+$ jitagent compile examples/rank.json --name rank
 requirement  Rank {name, score} records from highest score to lowest. Records with the same…
 seeds        5   model claude-haiku-4-5   backend cli   cache auto
 miss: nothing reusable found
   wrote 8 extra test cases
-    {"records": [{"name": "alice",…   (Three-way tie causes rank to skip from 1 to 4)
-    {"records": [{"name": "alice",…   (Negative scores ranked lower than zero)
-      ! assumes something the requirement did not say: Scores can be negative and follow st…
-    {"records": [{"name": "zoe", "…   (Names sorted alphabetically within same rank, regard…
-    {"records": [{"name": "alice",…   (Four-way tie causes rank to skip from 1 to 5)
+    {"records": [{"name": "bob", "…   (Two separate tie groups; each sorted by name within…
+    {"records": [{"name": "z", "sc…   (Negative scores rank below positive; highest to lowe…
+      ! assumes something the requirement did not say: Scores can be floating-point numbers…
+    {"records": [{"name": "a", "sc…   (Zero score is a valid boundary; tied zeros rank belo…
+    {"records": [{"name": "a", "sc…   (Decimal scores compared with exact equality; 85.5 ≠…
   attempt 1  passed
 
   PASS  static                passed
@@ -36,12 +36,12 @@ miss: nothing reusable found
   PASS  examples              13/13 passed
   PASS  return_schema         passed
 
-  level: VERIFIED   took: 47ms
+  level: VERIFIED   took: 65ms
 
-result: ok   tokens 3569in/2154out
+result: ok   tokens 3692in/1680out
 cache: miss   no hit; synthesised a new one
-name rank   handle fn_69889ea0d4c5   v1   level VERIFIED
-$ agentjit call rank '{"records":[{"name":"zoe","score":7},{"name":"amy","score":9}]}'
+name rank   handle fn_8617fc1e2b62   v1   level VERIFIED
+$ jitagent call rank '{"records":[{"name":"zoe","score":7},{"name":"amy","score":9}]}'
 ok    v1
 [
   {
@@ -53,7 +53,7 @@ ok    v1
     "rank": 2
   }
 ]
-$ agentjit list
+$ jitagent list
 NAME              VER    CASES   REQUIREMENT
 rank              v1        13   Rank {name, score} records from highest score to lowest.
 ```
@@ -72,11 +72,11 @@ group, sum, format — and a function is something you can read, test, version a
 model's judgement is worth paying for *once*, to write that function. It is not worth
 paying for two hundred times to re-derive it.
 
-So hand `agentjit` a sentence and a couple of examples. It writes the test cases out in
+So hand `jitagent` a sentence and a couple of examples. It writes the test cases out in
 full, writes the code, runs it against every case in a sandbox, and stores the lot under a
 name you choose.
 
-| | in the agent | after `agentjit compile` |
+| | in the agent | after `jitagent compile` |
 | --- | --- | --- |
 | per call | seconds, thousands of tokens | ~30ms, zero tokens |
 | same input twice | may differ | identical |
@@ -94,13 +94,13 @@ regeneration of everything you have.
 ## Quickstart
 
 ```bash
-pip install agent-jit        # the import name and the CLI are `agentjit`
-agentjit selftest            # 6 corpus cases, each with a deliberately planted bug
+pip install jitagent        # the import name and the CLI are `jitagent`
+jitagent selftest            # 6 corpus cases, each with a deliberately planted bug
 ```
 
 `selftest` ships with the package and spends nothing. It is worth running on a new
 machine: how the sandbox contains a memory bomb is platform-dependent, so "does this
-behave here?" is a real question. To work on `agentjit` itself:
+behave here?" is a real question. To work on `jitagent` itself:
 
 ```bash
 git clone https://github.com/Birfy/agentjit && cd agentjit
@@ -109,7 +109,7 @@ pytest                       # 102 unit tests — no network, no tokens
 ```
 
 Synthesis needs a model. If you have [Claude Code](https://claude.ai/code) installed,
-`agentjit` shells out to it and uses its authorisation; otherwise set `ANTHROPIC_API_KEY`
+`jitagent` shells out to it and uses its authorisation; otherwise set `ANTHROPIC_API_KEY`
 and pass `--via api`.
 
 A requirement is a JSON file: a sentence, plus a few examples that pin down what you mean.
@@ -135,21 +135,21 @@ That is [`examples/rank.json`](examples/rank.json) — from a checkout, this run
 stands:
 
 ```bash
-agentjit compile examples/rank.json --name rank   # write the cases, then the code
-agentjit get     rank                             # print the source
-agentjit call    rank '{"records": [...]}'        # run it in the sandbox
-agentjit list                                     # what is in the registry
-agentjit search  "rank records by score"          # is there one already?
-agentjit inspect rank                             # cases, versions, verification report
+jitagent compile examples/rank.json --name rank   # write the cases, then the code
+jitagent get     rank                             # print the source
+jitagent call    rank '{"records": [...]}'        # run it in the sandbox
+jitagent list                                     # what is in the registry
+jitagent search  "rank records by score"          # is there one already?
+jitagent inspect rank                             # cases, versions, verification report
 ```
 
-The registry lives in `~/.agentjit/registry`; `AGENTJIT_HOME` or `--home` moves it.
+The registry lives in `~/.jitagent/registry`; `JITAGENT_HOME` or `--home` moves it.
 
 ### From Python
 
 ```python
-from agentjit import compile_function, get_code, call_function, Example
-from agentjit.llm import ClaudeCliClient
+from jitagent import compile_function, get_code, call_function, Example
+from jitagent.llm import ClaudeCliClient
 
 compile_function(
     "Rank {name, score} records from highest score to lowest...",
@@ -293,11 +293,11 @@ precise.
 
 ## Reuse, and why the lookup is allowed to be crude
 
-Compiling once saves nothing; the saving is in not compiling the second time. `agentjit
+Compiling once saves nothing; the saving is in not compiling the second time. `jitagent
 inspect` shows what is actually stored:
 
 ```console
-$ agentjit inspect rank
+$ jitagent inspect rank
 -- test cases (13) --
   [caller]    {"records": [{"name": "alice", "score": 90}, … -> [{"name": "alice", "rank": 1}, …
   [caller]    {"records": []} -> []
@@ -379,7 +379,7 @@ cases it can see; `verify.py` records what would trigger that.
 ## The code
 
 ```
-src/agentjit/
+src/jitagent/
   jit.py            the product surface: compile / get_code / call / search / inspect
   propose.py        get the model to write the cases out — before the code, separate call
   prompts.py        the two prompts; the requirement sits in an untrusted data region

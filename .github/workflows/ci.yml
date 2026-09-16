@@ -40,7 +40,7 @@ jobs:
       # deliberately planted bug and names which gate has to catch it. A gate that stops
       # firing, or starts firing on the correct implementation, fails here.
       - name: Corpus selftest
-        run: agentjit selftest
+        run: jitagent selftest
 
       # audit_traps reads the committed audit_result.json, so it needs no model. It is
       # the check that the recorded audit still says what the README claims it says.
@@ -72,8 +72,8 @@ jobs:
         run: |
           python -m venv /tmp/wheeltest
           /tmp/wheeltest/bin/pip install --quiet dist/*.whl
-          /tmp/wheeltest/bin/agentjit --help
-          /tmp/wheeltest/bin/agentjit selftest
+          /tmp/wheeltest/bin/jitagent --help
+          /tmp/wheeltest/bin/jitagent selftest
 
       - uses: actions/upload-artifact@v4
         with:

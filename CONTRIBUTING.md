@@ -3,7 +3,7 @@
 ```bash
 pip install -e ".[dev]"
 pytest              # 102 unit tests — no network, no tokens
-agentjit selftest   # 6 corpus cases, each with a deliberately planted bug
+jitagent selftest   # 6 corpus cases, each with a deliberately planted bug
 ```
 
 Both must pass before anything else is worth discussing. Neither touches the network: the
@@ -32,9 +32,9 @@ what a new gate has to beat.
 A new gate needs:
 
 1. **A real failure it would have caught** — a model output, not a hypothetical.
-2. **A corpus case** in `src/agentjit/corpus/`, whose `case.json` names the gate that must
+2. **A corpus case** in `src/jitagent/corpus/`, whose `case.json` names the gate that must
    reject it and why.
-3. **Evidence it does not fire on correct code.** `agentjit selftest` covers the corpus;
+3. **Evidence it does not fire on correct code.** `jitagent selftest` covers the corpus;
    for anything subtle, `tools/audit_e2e.py` runs real compiles against independent
    reference implementations.
 

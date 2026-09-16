@@ -8,13 +8,13 @@ import json
 
 import pytest
 
-from agentjit import Example, Level, Report, Spec
+from jitagent import Example, Level, Report, Spec
 # TestSet is aliased to Suite: pytest collects any class named Test* and then
 # complains that it has an __init__
-from agentjit.registry import NotCacheable, Registry
-from agentjit.registry import TestSet as Suite
-from agentjit.registry import spec_hash
-from agentjit.types import GateResult
+from jitagent.registry import NotCacheable, Registry
+from jitagent.registry import TestSet as Suite
+from jitagent.registry import spec_hash
+from jitagent.types import GateResult
 
 REQ = "Group rows by type and sum the amount"
 CODE = "def solve(params, ctx):\n    return {'n': len(params['rows'])}\n"
@@ -124,7 +124,7 @@ def test_examples_dedup_by_input():
 def test_get_by_name(reg):
     """The handle is for machines, the name is for people. The way this actually gets
     used is "what was that ranking function called?"."""
-    from agentjit.jit import get_code
+    from jitagent.jit import get_code
 
     fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="group_sum")
     assert reg.get("group_sum").spec_hash == fn.spec_hash
@@ -136,7 +136,7 @@ def test_get_by_name(reg):
 def test_a_name_points_at_exactly_one_function(reg):
     """A name pointing at two functions is no index at all. Better to fail here than
     to let the result of get("rank") depend on directory traversal order."""
-    from agentjit.registry import NameTaken
+    from jitagent.registry import NameTaken
 
     reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="rank")
     other = Spec(intent="something else", param_schema={"type": "object"},

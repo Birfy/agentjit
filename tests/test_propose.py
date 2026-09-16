@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-from agentjit import Example, Registry, Sandbox
-from agentjit.jit import compile_function
-from agentjit.llm import LLMResponse, ScriptedClient
-from agentjit.propose import propose_tests
+from jitagent import Example, Registry, Sandbox
+from jitagent.jit import compile_function
+from jitagent.llm import LLMResponse, ScriptedClient
+from jitagent.propose import propose_tests
 
 REQ = ("Rank {name, score} records from highest score to lowest. "
        "Records with the same score share a rank.")
@@ -63,8 +63,8 @@ def test_assumes_is_parsed_and_marked():
 def test_assumes_survives_a_round_trip_to_disk(tmp_path):
     """An assumption is stored with its case. A year from now, the only thing that can
     answer "why is this the expected value" is this field."""
-    from agentjit import Level, Report, Registry, Spec
-    from agentjit.types import GateResult
+    from jitagent import Level, Report, Registry, Spec
+    from jitagent.types import GateResult
 
     reg = Registry(tmp_path / "r")
     report = Report(level=Level.VERIFIED, gates=[GateResult("static", True, "passed")])

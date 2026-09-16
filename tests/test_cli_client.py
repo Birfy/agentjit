@@ -2,13 +2,13 @@
 
 What is under test is how the CLI's JSON becomes an LLMResponse, and in particular
 whether the fixed harness overhead gets subtracted. Actually driving a synthesis is
-`agentjit compile --via cli`; that costs tokens and does not belong in a unit test.
+`jitagent compile --via cli`; that costs tokens and does not belong in a unit test.
 """
 import json
 
 import pytest
 
-from agentjit.llm import CLI_OVERHEAD_TOKENS, ClaudeCliClient, Refused
+from jitagent.llm import CLI_OVERHEAD_TOKENS, ClaudeCliClient, Refused
 
 
 class FakeProc:
@@ -41,7 +41,7 @@ def fake(monkeypatch):
 def test_the_harness_overhead_is_subtracted(fake):
     """The CLI carries Claude Code's own system prompt and tool definitions on every
     call. Without subtracting them, synthesis looks an order of magnitude more expensive
-    than it is — that overhead belongs to Claude Code, not to agentjit."""
+    than it is — that overhead belongs to Claude Code, not to jitagent."""
     r = ClaudeCliClient().complete(system="S", user="U")
 
     raw = 12 + 22_000 + 400

@@ -6,9 +6,9 @@ stopped, and who gets blamed when something goes wrong inside a batch.
 """
 import pytest
 
-from agentjit import Example, Level, Registry, Report, Runtime, Sandbox, Spec
-from agentjit.runtime import UnknownHandle
-from agentjit.types import GateResult
+from jitagent import Example, Level, Registry, Report, Runtime, Sandbox, Spec
+from jitagent.runtime import UnknownHandle
+from jitagent.types import GateResult
 
 REQ = ("Rank {name, score} records by descending score. "
        "Records with the same score share a rank.")

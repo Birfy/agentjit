@@ -1,10 +1,10 @@
-"""Component-level unit tests. The corpus cases (`agentjit selftest`) check end-to-end
+"""Component-level unit tests. The corpus cases (`jitagent selftest`) check end-to-end
 behaviour; this file checks the parts."""
 import pytest
 
-from agentjit import Example, Sandbox, Spec, verify
-from agentjit.static_check import check
-from agentjit.types import deep_equal
+from jitagent import Example, Sandbox, Spec, verify
+from jitagent.static_check import check
+from jitagent.types import deep_equal
 
 CODE = "def solve(params, ctx):\n    return {'n': len(params['rows'])}\n"
 
@@ -127,7 +127,7 @@ def test_strptime_is_known_broken_and_the_prompt_says_so(sb):
     holds, the prompt has to say so. The day the sandbox can run strptime this goes red
     — and that is the signal to delete the passage from the prompt.
     """
-    from agentjit.prompts import SYSTEM
+    from jitagent.prompts import SYSTEM
 
     src = ('def solve(params, ctx):\n'
            '    return {"v": datetime.datetime.strptime(params["s"], "%Y-%m-%d").year}\n')

@@ -11,10 +11,10 @@ import json
 
 import pytest
 
-from agentjit import Example, Registry, Sandbox
-from agentjit.cli import main
-from agentjit.llm import ScriptedClient
-from agentjit.synth import compile_function
+from jitagent import Example, Registry, Sandbox
+from jitagent.cli import main
+from jitagent.llm import ScriptedClient
+from jitagent.synth import compile_function
 
 REQ = ("Rank {name, score} records from highest score to lowest. "
        "Records with the same score share a rank.")

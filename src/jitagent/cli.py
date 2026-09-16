@@ -12,7 +12,7 @@ from .types import Example
 from .verify import Thresholds, verify
 
 # The corpus ships inside the package. It used to be resolved relative to the source
-# tree, which meant `agentjit selftest` — the command the README tells you to run
+# tree, which meant `jitagent selftest` — the command the README tells you to run
 # straight after installing — only worked from a git checkout. It is also the one
 # check worth running on a new machine: how the sandbox contains a memory bomb is
 # platform-dependent, so "does it behave here" is a real question.
@@ -120,7 +120,7 @@ def _generator(via: str, model: str):
 class _LazyClient:
     """Build the API client only when synthesis actually needs it.
 
-    That way `agentjit compile` still searches the cache on a machine with no
+    That way `jitagent compile` still searches the cache on a machine with no
     credentials — a cache hit needs none. Constructing `AnthropicClient` imports
     the SDK and reads credentials; doing that up front would make "is there one
     already?" depend on the network too.
@@ -142,8 +142,8 @@ class _LazyClient:
                     f"Cache miss, and the Anthropic client could not start: {e}\n"
                     "    pip install anthropic\n"
                     "    # or use the local Claude Code CLI instead:\n"
-                    "    agentjit compile <file> --via cli\n"
-                    "To only use functions that already exist: agentjit list / search."
+                    "    jitagent compile <file> --via cli\n"
+                    "To only use functions that already exist: jitagent list / search."
                 ) from e
         return self._real.complete(**kw)
 
@@ -232,7 +232,7 @@ def cmd_get(args) -> int:
 
     code = get_code(args.name, registry=Registry(args.home))
     if not code:
-        print(f"no function named {args.name!r} (try: agentjit list)", file=sys.stderr)
+        print(f"no function named {args.name!r} (try: jitagent list)", file=sys.stderr)
         return 1
     print(code, end="" if code.endswith("\n") else "\n")
     return 0
@@ -257,17 +257,17 @@ def cmd_call(args) -> int:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
-        prog="agentjit",
+        prog="jitagent",
         description="Compile a requirement into a verified, reusable sandboxed function.")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--home", default=None,
-                   help="registry directory (default: $AGENTJIT_HOME/registry "
-                        "or ~/.agentjit/registry)")
+                   help="registry directory (default: $JITAGENT_HOME/registry "
+                        "or ~/.jitagent/registry)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("compile", help="look in the cache, synthesise on a miss")
     c.add_argument("requirement", help="JSON file: {requirement, examples[]}")
-    c.add_argument("--name", default=None, help="name it, so `agentjit get <name>` works")
+    c.add_argument("--name", default=None, help="name it, so `jitagent get <name>` works")
     c.add_argument("--model", default=None)
     c.add_argument("--attempts", type=int, default=3)
     c.add_argument("-o", "--out", default=None, help="write the source here on success")

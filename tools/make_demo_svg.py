@@ -220,7 +220,7 @@ def main(argv: list[str]) -> int:
               f"what the case pins down.", file=sys.stderr)
         return 1
 
-    dst.write_text(render(lines, total, "agentjit — text in, code out, fetch it by name"))
+    dst.write_text(render(lines, total, "jitagent — text in, code out, fetch it by name"))
     print(f"{dst}  {len(lines)} lines, {total:.1f}s loop, {dst.stat().st_size // 1024}KB")
     return 0
 

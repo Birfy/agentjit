@@ -11,7 +11,7 @@ it back by name.**
 ### The surface
 
 - `compile_function` / `get_code` / `call_function` / `search_functions` /
-  `inspect_function`, and an `agentjit` CLI over the same five operations.
+  `inspect_function`, and an `jitagent` CLI over the same five operations.
 - Three synthesis backends behind one method (`complete(system=, user=)`): the local
   `claude` CLI, the Anthropic API, and a scripted client that makes the whole loop
   testable with no network and no tokens.
@@ -24,7 +24,7 @@ it back by name.**
 
 ### Correctness
 
-- `agentjit` writes the test cases out in full **before** the code exists, so the code
+- `jitagent` writes the test cases out in full **before** the code exists, so the code
   cannot shape the cases. Your seed examples anchor them, and a generated case that
   contradicts one is dropped.
 - A failure that occurs *only* on generated cases is handed back for adjudication rather
