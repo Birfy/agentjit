@@ -1,13 +1,23 @@
 # agent-jit
 
-一个外挂组件：**输入文本需求 → 长出代码 → 沙箱里调用 → 返回结果 → 缓存复用。**
+一个外挂组件：**一段话进去，长出代码，之后按名字拿回来。**
 
-```
-compile_function("把 CSV 行按 type 分组求和", examples=[...])  → handle
-call_function(handle, {rows: [...]})  × 200                    → 结果
+```bash
+agentjit compile rank.json --name rank    # 一段话 + 几个例子 → 合成 + 全套验证
+agentjit get  rank                        # 把代码打出来
+agentjit call rank '{"records": [...]}'   # 在沙箱里调用
 ```
 
-第 1 次比 agent 自己算贵，第 6 次回本，第 200 次省下两个数量级。
+```python
+compile_function("把 {name, score} 按 score 排名次…", examples, name="rank")
+get_code("rank")                      # 源码
+call_function("rank", {"records": [...]})   # × 200
+```
+
+**生成方式是可替换的** —— `compile_function` 只要一个 `complete(system=, user=)`
+的对象。自带三个：直连 API、走本机 `claude` CLI（不要 API key）、回放脚本（测试用）。
+
+第 1 次比 agent 自己算贵，**实测第 6.2 次回本**，第 200 次省下两个数量级。
 
 Agent 擅长的是"想清楚要做什么"，不是"做 200 遍"。后者交给代码——这正是 JIT
 对解释器做的事：热点不该每次重新推理，该编译一次然后直接跑。
@@ -23,19 +33,40 @@ Agent 擅长的是"想清楚要做什么"，不是"做 200 遍"。后者交给�
 - **测试集是资产，代码是可再生的。** Registry 以测试集为中心，代码只是当前通过它的
   一个实现。模型升级 = 免费的全库重生成。每次线上失败都变成永久回归用例。
 
-## 现状：闭环了，但还没有一次真实合成
+## 现状：闭环跑通了
 
 判官先到位，选手后上场，最后才谈复用 —— 先建验证管线，再接合成循环，再把合成
 出来的东西存下来、换个说法也能找回来、反复调用。每一部分都能独立测：验证管线靠
 人为植入错误的语料，合成循环靠回放脚本，复用靠 registry 的落盘、查找和选版本
-（全程不打网络、不花 token）。
+（这些全程不打网络、不花 token）。
 
 ```bash
 pip install -e .
 agentjit selftest                        # 验证管线：11 个语料用例
-pytest                                   # 96 个单测，含合成→入库→查找→调用全流程
-agentjit compile examples/rank.json      # 先查缓存，没有才合成（合成要 API 凭据）
+pytest                                   # 108 个单测，含合成→入库→查找→调用全流程
+agentjit compile examples/rank.json --name rank   # 真的合成一个（走本机 claude CLI）
 ```
+
+### 第一次真实合成的数
+
+`examples/rank.json`（并列名次跳号 + 同分按字典序）刻意选了一个没在测试里出现过
+的任务 —— 测试里的实现是人写的，证明不了合成质量。Haiku 4.5 跑 5 次：
+
+| | |
+| --- | --- |
+| 成功率 | **5 / 5**，全部 `VERIFIED` |
+| 尝试次数 | **每次都是 1 次就对**，修复循环没被用上 |
+| 变异得分 | 100% |
+| token | 1841 in / 2671~6711 out（已扣掉 CLI 的固定开销） |
+| 墙钟 | 28~62s |
+| 回本点 | **6.2 次调用** |
+
+**最该盯的那件事有答案了：关卡在真实模型产物上零误报。** 之前的担心是"语料里的
+错误实现是人写的，真实模型写出来的代码长得不一样，关卡可能在正确代码上卡住"——
+5 次里一次都没有。
+
+同时也意味着**修复循环还没被真正压力测试过**：5 次都一次写对，那三次重试的结构化
+反馈一次也没跑到。要么这个任务对 Haiku 太简单，要么得找更难的需求来试。
 
 ### 合成循环
 
@@ -89,12 +120,13 @@ ok   11_memory_bomb       REJECTED   examples.visible     内存炸弹，看门�
 合成一次不省钱，省钱的是第二次之后不用再合成。
 
 ```bash
-agentjit adopt tests/corpus/01_correct    # 把一份人写的实现验一遍再入库，不花 token
-agentjit list                             # 库里有什么
-agentjit search "按 type 汇总 amount"      # 写需求前先看看有没有现成的
-agentjit call fn_f3db31 '{"rows": [...]}' # 调一次
-agentjit bench fn_f3db31 -n 200           # 调 200 次，看账
-agentjit inspect fn_f3db31                # 测试集、版本、后置断言、收支
+agentjit adopt tests/corpus/01_correct --name group_sum   # 人写的实现验一遍入库，不花 token
+agentjit list                                 # 库里有什么
+agentjit search "按 type 汇总 amount"          # 写需求前先看看有没有现成的
+agentjit get   group_sum                      # 把代码打出来
+agentjit call  group_sum '{"rows": [...]}'    # 调一次（也认 group_sum@v2）
+agentjit bench group_sum -n 200               # 调 200 次，看账
+agentjit inspect group_sum                    # 测试集、版本、后置断言、收支
 ```
 
 存的核心是**测试集**，`code.py` 只是"当前通过它的一个实现"。一个 `spec_hash` 下
@@ -159,14 +191,15 @@ guard 用的是同一把尺子，不会出现"查找说兼容、调用时被 gua
 
 ### 已知缺口
 
-- **真实 LLM 合成还没跑通过一次。** 循环逻辑全部由回放脚本覆盖，但本机的
-  OAuth 凭据已过期（`ant auth login` 可修），所以还没有一条真实的端到端记录。
-  在拿到之前，"Haiku 几次能修对"这个数是未知的。
-- **`net_savings` 只有管道，没有真数。** 账算得对（有测试），但喂进去的合成成本
-  目前要么是 0（`adopt` 进来的人写实现），要么是回放脚本编的。**它转正不说明
-  任何问题** —— 真正要看的是一次真实合成之后要调多少次才回本。
-- **`reasoning_tokens = 600` 是这批里最软的一个数。** 它直接决定回本点，而它没有
-  任何实证支撑。有真实轨迹之前，打印出来的 `net_savings` 只能当量级看。
+- **修复循环没有被真实模型压力测试过。** 5 次合成 5 次一遍过，三次重试那条路
+  一次也没走到。"结构化反馈到底有没有用"仍然是未知的 —— 要么换个更难的需求，
+  要么换个更弱的模型。
+- **`reasoning_tokens = 600` 是全篇最软的一个数。** 回本点 6.2 直接由它决定，
+  而它没有任何实证支撑：它代表"agent 自己做一遍要多少推理 token"，要从真实轨迹里
+  量。在那之前 6.2 这个数只能当量级看。
+- **走 CLI 的 token 数是估的。** `claude -p` 每次带 ~22.2k 固定开销（Claude Code
+  自己的系统提示和工具定义），已经扣掉，但这个常数会随 CLI 版本变。
+  output token 是干净的。
 - **沙箱是正确性沙箱，不是安全沙箱。** 受限 builtins + AST 白名单 + rlimit +
   内存看门狗挡得住事故和随手的逃逸，挡不住认真的攻击者。macOS 直接忽略
   `RLIMIT_AS`，内存上限靠父进程轮询 RSS。容器/microVM 是 M2。
@@ -201,7 +234,7 @@ src/agentjit/
   holdout.py        保留集分割
   verify.py         关卡编排，便宜的先跑，第一个阻断失败就停
   infer.py          从例子反推 schema（会分辨"记录"和"映射"）
-  llm.py            客户端协议 + 模型能力表 + 回放用的脚本客户端
+  llm.py            生成后端：直连 API / 走本机 claude CLI / 回放脚本
   prompts.py        合成 prompt，需求/例子放在不可信数据区
   synth.py          合成循环
   registry.py       落盘：以测试集为中心，多版本，隔离
