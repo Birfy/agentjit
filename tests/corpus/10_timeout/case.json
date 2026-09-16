@@ -116,7 +116,7 @@
   "expect": {
     "level": "REJECTED",
     "failing_gates": [
-      "examples.visible"
+      "examples"
     ]
   }
 }

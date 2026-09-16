@@ -8,12 +8,16 @@ from typing import Any
 
 
 class Level(str, Enum):
-    """验证等级。见 docs/correctness.md §11。"""
+    """验证结论。
 
-    REJECTED = "REJECTED"        # 静态检查都没过，不该进沙箱
-    EPHEMERAL = "EPHEMERAL"      # 能跑，但拿不出验收判据 —— 不进持久缓存
-    VERIFIED = "VERIFIED"        # 全部关卡通过
-    CONFIRMED = "CONFIRMED"      # VERIFIED + 调用方确认的变形性质（M1）
+    只有三档，因为只问三个问题：进得了沙箱吗、有判据吗、过了吗。
+    （早先还有个 CONFIRMED，留给"调用方确认的变形性质"—— 那套机制删掉了，
+    枚举值也就跟着删了，免得留一个任何代码路径都产不出来的档位。）
+    """
+
+    REJECTED = "REJECTED"        # 静态检查没过，或者用例没过
+    EPHEMERAL = "EPHEMERAL"      # 能跑，但没有用例可判 —— 不进持久缓存
+    VERIFIED = "VERIFIED"        # 通过了调用方给的全部用例
 
 
 @dataclass
@@ -23,10 +27,10 @@ class Example:
     input: dict[str, Any]
     output: Any
     note: str = ""
-    boundary: bool = False       # 是否边界用例；VERIFIED 要求至少一个
-    # 这条判据是谁给的。测试集只增不减（correctness.md §10），一年后回头看
-    # "这个期望值凭什么是它"，唯一能回答的就是出处。
-    origin: str = "caller"       # caller | adjudication | property | incident | manual
+    boundary: bool = False       # 只是个标注，方便人看；不再影响判定
+    # 这条判据是谁给的。用例只增不减，一年后回头看"这个期望值凭什么是它"，
+    # 唯一能回答的就是出处。
+    origin: str = "caller"       # caller | reverify | manual
 
     def to_dict(self) -> dict[str, Any]:
         return {"input": self.input, "output": self.output, "note": self.note,

@@ -1,10 +1,13 @@
-"""agent-jit —— 把文本需求编译成可复用的、经过验证的沙箱函数。
+"""agent-jit —— 一段话进去，长出代码，之后按名字拿回来。
 
-先让判官到位，再让选手上场，最后才谈复用：
-验证管线（verify）→ 合成循环（synth）→ 落盘复用（registry / runtime）。
+    compile_function(需求, examples, name="rank")  → 合成 + 验证 + 入库
+    get_code("rank")                              → 源码
+    call_function("rank", {...})                  → 在沙箱里跑一次
+
+正确性由**调用方给的用例**保证。除此之外只有两道关：静态检查（生成的代码不该能
+读文件、不该能 import）和沙箱（它在你的机器上执行）。
 """
 from .types import Example, GateResult, Level, Report, Spec
-from .econ import CostModel, Ledger
 from .registry import Function, Registry, TestSet, Version
 from .runtime import CallOutcome, Runtime
 from .sandbox import Sandbox
@@ -14,8 +17,7 @@ from .jit import (CompileResult, call_function, compile_function, get_code,
 
 __all__ = ["Example", "GateResult", "Level", "Report", "Spec",
            "Sandbox", "Thresholds", "verify",
-           "CostModel", "Ledger", "Registry", "Function", "TestSet", "Version",
+           "Registry", "Function", "TestSet", "Version",
            "Runtime", "CallOutcome", "CompileResult",
-           # 产品面：一段话进去 → 长出代码 → 按名字拿回来
            "compile_function", "get_code", "call_function",
            "search_functions", "inspect_function"]

@@ -1,21 +1,17 @@
-"""合成循环。见 docs/design.md §6.3。
+"""合成循环：生成 → 静态检查 → 跑用例 → 结构化反馈 → 再生成，至多三次。
 
-    生成 → 静态检查 → 跑用例 → 结构化反馈 → 再生成，至多三次。
+**反馈必须结构化。** "第 2 个例子期望 `{"sale": 300.0}` 实际 `{"sale": "300"}`"
+能让模型一次修对；"没通过，再试试"只会让它随机重写。
 
-两条纪律：
-
-- **修复循环只能看见可见用例。** 保留集对它完全不可见，否则防过拟合就白做了
-  （docs/correctness.md §9）。保留集挂了允许轮换一次重来 —— 轮换是防运气不好的
-  分割，不是给模型再看一眼的机会。
-- **不是所有失败都该反馈给模型。** 崩溃、不确定、死分支是代码问题，反馈回去能修；
-  变异得分低是**测试集**问题，反馈回去只会让模型扭曲代码去迎合弱用例。后者要如实
-  报给调用方："你的用例不够，缺的正是这几处"。
+早先这里还有保留集：把 30% 的用例藏起来不给修复循环看，防的是模型写出
+`if input == X: return Y`。连同轮换机制一起删掉了 —— 正确性现在由调用方的
+用例保证，模型能看见全部用例。**真要出问题多半出在这里**，`git log` 里能找回来。
 """
 from __future__ import annotations
 
 import ast
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from .infer import spec_schemas
 from .llm import LLMClient, Refused
@@ -31,7 +27,6 @@ _FENCE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.S)
 @dataclass
 class Attempt:
     n: int
-    rotation: int
     code: str
     gate: str = ""          # 挂掉的关卡；"" = 通过
     summary: str = ""
@@ -61,7 +56,7 @@ class SynthResult:
         lines = []
         for a in self.attempts:
             tag = "通过" if not a.gate else f"{a.gate} —— {a.summary}"
-            lines.append(f"  尝试 {a.rotation}.{a.n}  {tag}")
+            lines.append(f"  尝试 {a.n}  {tag}")
         if self.report:
             lines.append("")
             lines.append("  " + self.report.render().replace("\n", "\n  "))
@@ -95,9 +90,6 @@ def extract_code(text: str, entry: str = "solve") -> str:
 def spec_for(requirement: str, examples: list[Example], entry: str = "solve") -> Spec:
     """从需求和例子推出规格。
 
-    schema 从**全部**例子推，包括保留集 —— 结构是契约的一部分，不是答案。
-    保留集要藏起来的是"这个输入对应哪个输出"，不是"输入长什么样"。
-
     单独拆出来是因为查找要用：缓存的 key 里有 schema，所以得先有规格才能去查，
     而查中了就根本不用合成。
     """
@@ -114,7 +106,6 @@ def compile_function(
     sandbox: Sandbox | None = None,
     thresholds: Thresholds | None = None,
     max_attempts: int = 3,
-    max_rotations: int = 1,
     entry: str = "solve",
 ) -> SynthResult:
     th = thresholds or Thresholds()
@@ -122,93 +113,50 @@ def compile_function(
     spec = spec_for(requirement, examples, entry)
 
     attempts: list[Attempt] = []
-    for rotation in range(max_rotations + 1):
-        code, why = _repair(requirement, spec, examples, client, sb, th,
-                            max_attempts, rotation, attempts)
-        if not code:
-            return SynthResult(False, spec, attempts=attempts, reason=why)
-
-        report = verify(code, spec, examples, thresholds=th, sandbox=sb)
-        if not report.failures:
-            return SynthResult(True, spec, code, report, attempts,
-                               review=review_flags(code))
-
-        failed = report.failures[0]
-        if failed.name == "examples.holdout" and rotation < max_rotations:
-            continue          # 换一组保留集从头合成；模型看不到刚才为什么挂
-
-        return SynthResult(False, spec, code, report, attempts,
-                           reason=_explain(failed.name, report),
-                           review=review_flags(code))
-
-    return SynthResult(False, spec, attempts=attempts,
-                       reason="轮换保留集后仍然没过 —— 多半在对可见用例过拟合")
+    code, report, why = _repair(requirement, spec, examples, client, sb, th,
+                                max_attempts, attempts)
+    if not code:
+        return SynthResult(False, spec, attempts=attempts, reason=why)
+    return SynthResult(True, spec, code, report, attempts, review=review_flags(code))
 
 
-def _repair(requirement, spec, examples, client, sb, th, max_attempts, rotation, attempts):
-    """内层：只跟可见用例打交道。返回 (code, failure_reason)。"""
-    from .holdout import NotEnoughExamples, split
+def _repair(requirement, spec, examples, client, sb, th, max_attempts, attempts):
+    """至多试 max_attempts 次，每次把上一次的具体失败喂回去。
 
-    try:
-        visible, held = (split(examples, th.holdout_ratio, th.holdout_seed, rotation)
-                         if th.run_holdout else (examples, []))
-    except NotEnoughExamples:
-        visible, held = examples, []
-
-    # 循环内用的判据：保留集和变异测试都关掉，其余关卡照跑 —— 崩溃、不确定、
-    # 死分支都是模型能改的代码问题，早一轮告诉它，就少一轮浪费。
-    loop_th = replace(th, run_holdout=False, run_mutation=False,
-                      min_examples=1, require_boundary=False,
-                      fuzz_n=max(40, th.fuzz_n // 4))
-
+    返回 (code, report, failure_reason)。通过的那一次的报告直接带出去 ——
+    早先外面还要再验一遍（那时外面跑的是带保留集和变异测试的终审，和循环里
+    那道不是同一回事）。现在两边一模一样，再验一遍纯属多跑一次沙箱。
+    """
     feedback, last = "", None
     for n in range(1, max_attempts + 1):
-        user = build_user(requirement, visible, spec.param_schema, spec.return_schema, feedback)
+        user = build_user(requirement, examples, spec.param_schema, spec.return_schema, feedback)
         try:
             resp = client.complete(system=SYSTEM, user=user)
         except Refused as e:
-            attempts.append(Attempt(n, rotation, "", "refused", str(e)))
-            return "", f"模型拒答：{e}"
+            attempts.append(Attempt(n, "", "refused", str(e)))
+            return "", None, f"模型拒答：{e}"
 
         code = extract_code(resp.text, spec.entry)
         if not code:
-            attempts.append(Attempt(n, rotation, "", "no_code", "回复里没有代码块",
+            attempts.append(Attempt(n, "", "no_code", "回复里没有代码块",
                                     resp.input_tokens, resp.output_tokens))
             feedback = render_feedback(resp.text[:600], "no_code",
                                        "回复里找不到 ```python 代码块", {})
             last = "no_code"
             continue
 
-        # 保留集的输入参与覆盖率统计，但不参与对错判定 —— 见 verify() 的说明
-        rep = verify(code, spec, visible, thresholds=loop_th, sandbox=sb,
-                     coverage_inputs=[e.input for e in held])
+        rep = verify(code, spec, examples, thresholds=th, sandbox=sb)
         if not rep.failures:
-            attempts.append(Attempt(n, rotation, code, "", "可见用例全过",
+            attempts.append(Attempt(n, code, "", "全部用例通过",
                                     resp.input_tokens, resp.output_tokens))
-            return code, ""
+            return code, rep, ""
 
         g = rep.failures[0]
-        attempts.append(Attempt(n, rotation, code, g.name, g.summary,
+        attempts.append(Attempt(n, code, g.name, g.summary,
                                 resp.input_tokens, resp.output_tokens))
         feedback = render_feedback(code, g.name, g.summary, g.detail)
         last = g.name
 
-    return "", (f"{max_attempts} 次尝试都没通过，最后卡在 {last}。"
-                "失败本身是有信息的 —— 多半说明这事不适合用代码做，"
-                "或者需求/例子之间本身不自洽。")
-
-
-def _explain(gate: str, report: Report) -> str:
-    g = report.gate(gate)
-    match gate:
-        case "mutation":
-            s = (g.detail.get("survivors", []) if g else [])
-            return ("代码通过了全部用例，但**用例太弱**：下面这些改动没有任何用例能发现。\n"
-                    + "\n".join(f"    {x}" for x in s)
-                    + "\n这不是代码问题 —— 补用例覆盖这些地方，或者确认这些差异确实无所谓。")
-        case "examples.holdout":
-            return "轮换保留集后仍然没过 —— 多半在对可见用例过拟合。"
-        case "coverage.branch":
-            return f"分支覆盖没到 100%：{g.summary if g else ''}"
-        case _:
-            return f"终审卡在 {gate}：{g.summary if g else ''}"
+    return "", None, (f"{max_attempts} 次尝试都没通过，最后卡在 {last}。"
+                      "失败本身是有信息的 —— 多半说明这事不适合用代码做，"
+                      "或者需求/例子之间本身不自洽。")

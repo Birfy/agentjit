@@ -1,11 +1,11 @@
-"""M0 的闭环：compile 一次 → 入库 → call 很多次 → net_savings 转正。
+"""闭环：一段话 → 合成 → 入库 → 按名字取代码 / 反复调用。
 
-全程用脚本客户端，不打网络、不花 token。**所以合成的 token 数是编的**：这里证明
-的是管道通了、账算对了，不是"Haiku 真的几次能修对"。后者要等 NEXT.md 第 0 项。
+全程用脚本客户端，不打网络、不花 token —— 这里证明的是管道通了，
+不是"Haiku 真的几次能修对"。
 """
 import pytest
 
-from agentjit import Example, Registry, Runtime, Sandbox
+from agentjit import Example, Registry, Runtime, Sandbox, get_code
 from agentjit.llm import ScriptedClient
 from agentjit.synth import compile_function
 
@@ -46,39 +46,31 @@ def sb():
     return Sandbox()
 
 
-def test_compile_register_call_and_earn_it_back(tmp_path, sb):
+def test_compile_then_get_and_call_by_name(tmp_path, sb):
     reg = Registry(tmp_path / "registry")
     rt = Runtime(reg, sb)
 
-    # --- compile 一次 -------------------------------------------------------
     r = compile_function(REQ, EXAMPLES, client=ScriptedClient([CORRECT]), sandbox=sb)
     assert r.ok, r.render()
+    fn = reg.put(REQ, r.spec, r.code, r.report, EXAMPLES, name="group_sum",
+                 model="scripted", attempts=len(r.attempts))
 
-    fn = reg.put(REQ, r.spec, r.code, r.report, EXAMPLES, model="scripted",
-                 attempts=len(r.attempts),
-                 # 一次真实 Haiku 合成的量级，占位用；真数等第 0 项
-                 input_tokens=9000, output_tokens=2500)
-    handle = fn.handle
-    assert rt.ledger(rt.function(handle)).net_savings < 0, "刚合成完必然是净亏的"
+    # 按名字取代码
+    assert "def solve" in get_code("group_sum", registry=reg)
+    assert reg.get("group_sum").spec_hash == fn.spec_hash
 
-    # --- call 很多次 --------------------------------------------------------
+    # 按名字反复调用
     args = {"rows": [{"type": "sale", "amount": f"${i}"} for i in range(1, 6)]}
-    outs = rt.call_many(handle, [args] * 200)
-    rt.flush()
-
+    outs = rt.call_many("group_sum", [args] * 200)
     assert all(o.ok for o in outs)
     assert outs[0].result == {"sale": 15.0}
 
-    led = rt.ledger(reg.get(handle))
-    assert led.ok == 200
-    assert led.net_savings > 0, led.render()
-    assert 0 < led.amortization_point < 20, "回本点不该是几百次 —— 那说明模型参数拍歪了"
-
-    # --- 落盘的是测试集，不只是代码 ----------------------------------------
-    back = reg.get(handle)
+    # 落盘的是用例，不只是代码
+    back = reg.get("group_sum")
     assert len(back.tests.examples) == len(EXAMPLES)
-    assert back.best().code.strip() == r.code.strip()   # 落盘时补了个结尾换行
+    assert back.best().code.strip() == r.code.strip()
     assert back.best().report.level.value == "VERIFIED"
+
 
 
 def test_recompiling_the_same_requirement_adds_a_version_not_a_function(tmp_path, sb):

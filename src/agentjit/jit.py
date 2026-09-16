@@ -23,12 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .econ import DEFAULT as DEFAULT_COST
-from .econ import CostModel
 from .llm import LLMClient
 from .lookup import Candidate, Lookup, find, search
 from .registry import Function, NotCacheable, Registry
-from .runtime import CallOutcome, Runtime
+from .runtime import CallOutcome, Runtime, call_function  # noqa: F401  产品面的一员
 from .sandbox import Sandbox
 from .synth import SynthResult, compile_function as synthesize, spec_for
 from .types import Example, Level, Report, Spec
@@ -157,44 +155,28 @@ def compile_function(
 
 def _bank_the_hit(reg: Registry, lk: Lookup, examples: list[Example],
                   name: str = "") -> None:
-    """命中之后要记的两笔账。
+    """命中之后把本次的用例并进去。
 
-    1. `reverify_passes += 1` —— 这个版本又一次用别人的标准验过了。
-       `Function.best()` 的排序第二项就是它：被越多调用方验过的版本越可信。
-    2. **本次的例子进测试集。** 它们刚刚通过了复验，所以是和当前实现一致的
-       真判据。这是 correctness.md §10 里"测试集单调增长"最便宜的一条来源 ——
-       一次缓存命中顺手把这个函数变厚了一点，下次换模型重生成就更安全一点。
+    它们刚刚通过了复验，所以是和当前实现一致的真判据 —— 一次缓存命中顺手把这个
+    函数的用例变厚一点，下次换模型重新生成就更安全一点。
     """
-    v = lk.version
-    v.stats.reverify_passes += 1
     if name and lk.fn.name != name:
         lk.fn.name = name              # 命中了别人建的函数，顺手把名字贴上
         reg.save_spec(lk.fn)
-    for ex in examples:
-        lk.fn.tests.add_example(Example(ex.input, ex.output, note=ex.note,
-                                        boundary=ex.boundary, origin="reverify"))
-    reg.save_tests(lk.fn)
-    reg.save_version(lk.fn, v)
+    # 逐条加完再看有没有新的。any() 配生成器会短路，第一条加成功就不看后面的了。
+    added = [lk.fn.tests.add(Example(ex.input, ex.output, note=ex.note,
+                                     boundary=ex.boundary, origin="reverify"))
+             for ex in examples]
+    if any(added):
+        reg.save_tests(lk.fn)
 
 
 def get_code(name: str, *, registry: Registry | None = None) -> str:
-    """按名字（或 handle）取代码。取不到返回空串。
-
-    取的是 `best()` 那个版本 —— 被隔离的版本不会从这里出去。
-    """
+    """按名字（或 handle）取代码。取不到返回空串。取的是最新的那个版本。"""
     fn = (registry or Registry()).get(name)
     v = fn.best() if fn else None
     return v.code if v else ""
 
-
-def call_function(handle: str, args: dict[str, Any], *,
-                  registry: Registry | None = None,
-                  sandbox: Sandbox | None = None,
-                  cost: CostModel = DEFAULT_COST) -> CallOutcome:
-    rt = Runtime(registry, sandbox, cost)
-    out = rt.call(handle, args)
-    rt.flush()
-    return out
 
 
 def search_functions(query: str, *, registry: Registry | None = None,

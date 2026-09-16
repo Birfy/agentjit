@@ -109,7 +109,7 @@ def render_feedback(code: str, gate: str, summary: str, detail: dict) -> str:
     match gate:
         case "static":
             lines += [f"- {v}" for v in detail.get("violations", [])]
-        case "examples.visible" | "examples.holdout":
+        case "examples":
             for f in detail.get("failures", [])[:4]:
                 lines.append(f"输入   {dump(f['input'])}")
                 lines.append(f"期望   {dump(f['expected'])}")
@@ -120,24 +120,10 @@ def render_feedback(code: str, gate: str, summary: str, detail: dict) -> str:
                 lines.append("")
             if detail.get("load_error"):
                 lines.append(detail["load_error"][-800:])
-        case "fuzz.crash":
-            lines.append("这些输入符合 param_schema，但你的代码在它们上面崩了：")
-            for c in detail.get("crashes", [])[:4]:
-                lines.append(f"  {dump(c['input'])}  ->  {c['error']}")
-        case "fuzz.schema":
+        case "return_schema":
             lines.append("返回值不符合 return_schema：")
             for v in detail.get("violations", [])[:4]:
-                lines.append(f"  输入 {dump(v['input'])}  返回 {dump(v['value'])}  ->  {v['why']}")
-        case "determinism":
-            lines.append("同样的输入跑两遍结果不同。检查是不是遍历了 set、"
-                         "或者用了当前时间/随机数：")
-            for c in detail.get("cases", [])[:3]:
-                lines.append(f"  {dump(c['input'])}")
-        case "coverage.branch":
-            lines.append(f"未覆盖的行: {detail.get('missing_lines')}　"
-                         f"未覆盖的分支: {detail.get('missing_branches')}")
-            lines.append("这些代码没有任何用例能走到。**优先删掉它们** —— "
-                         "多半是不需要的防御性分支。确实是必要逻辑再保留。")
+                lines.append(f"  第 {v['i']} 个用例返回 {dump(v['value'])}  ->  {v['why']}")
         case _:
             lines.append(dump(detail)[:1200])
 

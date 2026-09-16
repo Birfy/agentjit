@@ -1,6 +1,6 @@
 {
   "name": "09_insufficient",
-  "why": "判据不足：代码没问题，但一个例子换不来复用权",
+  "why": "判据不足：代码没问题，但一个用例都不给，就没法判对错 —— 不进缓存",
   "impl": "impl.py",
   "spec": {
     "intent": "把行按 type 分组对 amount 求和；amount 可能带货币符号和千分位逗号，空值按 0 算",
@@ -37,26 +37,7 @@
       }
     }
   },
-  "examples": [
-    {
-      "input": {
-        "rows": [
-          {
-            "type": "refund",
-            "amount": "$1,200.50"
-          },
-          {
-            "type": "sale",
-            "amount": "$300"
-          }
-        ]
-      },
-      "output": {
-        "refund": 1200.5,
-        "sale": 300.0
-      }
-    }
-  ],
+  "examples": [],
   "expect": {
     "level": "EPHEMERAL",
     "failing_gates": []

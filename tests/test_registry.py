@@ -8,7 +8,7 @@ import pytest
 
 from agentjit import Example, Level, Report, Spec
 # TestSet 别名成 Suite：pytest 会去收集任何叫 Test* 的类，然后抱怨它有 __init__
-from agentjit.registry import MAX_PROBES_PER_KIND, NotCacheable, Probe, Registry
+from agentjit.registry import NotCacheable, Registry
 from agentjit.registry import TestSet as Suite
 from agentjit.registry import spec_hash
 from agentjit.types import GateResult
@@ -65,7 +65,7 @@ def test_put_then_get_roundtrip(reg):
     assert [e.input for e in back.tests.examples] == [e.input for e in EXAMPLES]
     v = back.best()
     assert v.name == "v1" and v.code == CODE and v.level is Level.VERIFIED
-    assert (v.synth_input_tokens, v.synth_output_tokens) == (100, 20)
+    assert (v.input_tokens, v.output_tokens) == (100, 20)
     assert v.report.gate("static").passed
 
 
@@ -101,77 +101,17 @@ def test_second_put_adds_a_version_and_keeps_one_test_set(reg):
     assert not list(reg.dir_of(fn.spec_hash).glob("v*/tests.json"))
 
 
-def test_best_prefers_level_then_reverify_then_failure_rate(reg):
-    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES)
-    reg.put(REQ, SPEC, CODE + "# v2\n", report(), [])
-    fn = reg.get(fn.handle)
-
-    assert fn.best().name == "v2", "同等条件下取新的"
-
-    v1, v2 = fn.versions
-    v1.stats.reverify_passes = 3
-    assert fn.best().name == "v1", "复验通过次数更高的赢"
-
-    v2.stats.reverify_passes = 3
-    v1.stats.ok, v1.stats.runtime_error = 8, 2
-    v2.stats.ok = 10
-    assert fn.best().name == "v2", "打平就看谁在线上挂得少"
-
-
-def test_quarantined_version_is_never_selected(reg):
-    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES)
-    reg.put(REQ, SPEC, CODE + "# v2\n", report(), [])
-    fn = reg.get(fn.handle)
-
-    reg.quarantine(fn, fn.version("v2"), "连续挂了 3 次")
-    assert fn.best().name == "v1"
-
-    reg.quarantine(fn, fn.version("v1"), "也挂了")
-    assert fn.best() is None and fn.quarantined
-
-    back = reg.get(fn.handle)                      # 隔离要立刻落盘，不等 flush
-    assert back.best() is None
-    assert "连续挂了 3 次" in back.version("v2").quarantine_reason
-    assert back.version("v2").code, "隔离不删代码 —— 它是排查线上分歧的证据"
 
 
 # --- 测试集 ----------------------------------------------------------------
 def test_examples_dedup_by_input():
     ts = Suite()
-    assert ts.add_example(EXAMPLES[0]) is True
-    assert ts.add_example(Example(EXAMPLES[0].input, {"n": 999})) is False
+    assert ts.add(EXAMPLES[0]) is True
+    assert ts.add(Example(EXAMPLES[0].input, {"n": 999})) is False
     assert len(ts.examples) == 1
 
 
-def test_probe_repeats_thicken_the_count_not_the_test_set():
-    ts = Suite()
-    assert ts.add_probe(Probe({"rows": None}, "guard", "不是数组")) is True
-    for _ in range(9):
-        assert ts.add_probe(Probe({"rows": None}, "guard", "不是数组")) is False
-    assert len(ts.probes) == 1 and ts.probes[0].seen == 10
 
-
-def test_probe_cap_drops_the_one_offs_first():
-    """上限到了先丢只见过一次的。反复被打中的输入才是真信号。"""
-    ts = Suite()
-    ts.add_probe(Probe({"keep": 1}, "guard", ""))
-    for _ in range(5):
-        ts.add_probe(Probe({"keep": 1}, "guard", ""))
-    for i in range(MAX_PROBES_PER_KIND + 20):
-        ts.add_probe(Probe({"noise": i}, "guard", ""))
-
-    guards = [p for p in ts.probes if p.kind == "guard"]
-    assert len(guards) == MAX_PROBES_PER_KIND
-    assert any(p.input == {"keep": 1} for p in guards)
-
-
-def test_probe_kinds_have_separate_budgets():
-    ts = Suite()
-    for i in range(MAX_PROBES_PER_KIND + 10):
-        ts.add_probe(Probe({"i": i}, "guard", ""))
-    ts.add_probe(Probe({"real": 1}, "runtime_error", "炸了"))
-    assert any(p.kind == "runtime_error" for p in ts.probes), \
-        "调用方的脏输入再多，也不该把真正的线上事故挤出去"
 
 
 # --- 名字 ------------------------------------------------------------------
@@ -213,10 +153,4 @@ def test_a_function_without_a_name_falls_back_to_its_handle(reg):
     assert fn.ref == fn.handle
 
 
-def test_quarantined_code_never_comes_out_of_get_code(reg):
-    """get_code 取的是 best()。被隔离的版本不该从这个口子流出去。"""
-    from agentjit.jit import get_code
 
-    fn = reg.put(REQ, SPEC, CODE, report(), EXAMPLES, name="doomed")
-    reg.quarantine(fn, fn.best(), "挂太多次")
-    assert get_code("doomed", registry=reg) == ""

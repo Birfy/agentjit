@@ -1,6 +1,6 @@
 """三级查找的测试。
 
-完成判据（NEXT.md §3）两条，一条比一条要紧：
+两条判据，一条比一条要紧：
 
 1. 同一需求换三种说法都命中同一个函数
 2. 一个语义相近但行为不同的需求（"求和" vs "求平均"）**不会**误命中
@@ -35,8 +35,6 @@ EXAMPLES = [
                       {"type": "sale", "amount": "$300"}]},
             {"refund": 1200.5, "sale": 300.0}),
     Example({"rows": []}, {}, boundary=True),
-    # 这一条别删：它是唯一走到 except ValueError 那条分支的用例，
-    # 拿掉之后 SUM_CODE 过不了 coverage.branch
     Example({"rows": [{"type": "sale", "amount": ""}]}, {"sale": 0.0}, boundary=True),
     Example({"rows": [{"type": "sale", "amount": "$100"},
                       {"type": "sale", "amount": "$50"}]}, {"sale": 150.0}),
@@ -168,16 +166,9 @@ def test_unrelated_requirements_do_not_even_become_candidates(reg, sb):
     assert not lk.hit and lk.candidates == [], "词法阈值该把它挡在复验之外，省一次沙箱"
 
 
-def test_a_quarantined_function_is_not_a_candidate(reg, sb):
-    fn = reg.all()[0]
-    reg.quarantine(fn, fn.best(), "挂太多次了")
-    lk = find(reg, SAME_THING[0], spec_for(SAME_THING[0], EXAMPLES), EXAMPLES, sandbox=sb)
-    assert not lk.hit
-
 
 def test_reverify_needs_examples_to_have_anything_to_say(reg, sb):
-    """不给例子就没有判据，没有判据就谈不上复验 —— 这时候 L2 只能 miss。
-    "调用方不给例子怎么办"的答案是差分裁决（M1），不是放宽这里。"""
+    """不给例子就没有判据，没有判据就谈不上复验 —— 这时候 L2 只能 miss。"""
     lk = find(reg, SAME_THING[0], spec_for(SAME_THING[0], EXAMPLES), [], sandbox=sb)
     assert not lk.hit
 
@@ -205,7 +196,6 @@ def test_a_cache_hit_thickens_the_test_set(reg, sb):
     after = reg.get(fn.handle)
     assert len(after.tests.examples) == before + 1
     assert after.tests.examples[-1].origin == "reverify"
-    assert after.best().stats.reverify_passes == 1, "被别人的标准验过一次，可信度记一笔"
 
 
 def test_missing_the_cache_without_a_client_is_an_error_not_a_silent_none(reg, sb):
