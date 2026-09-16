@@ -1,11 +1,12 @@
-"""agent-jit —— 一段话进去，长出代码，之后按名字拿回来。
+"""agent-jit — text in, code out, fetch it back by name.
 
-    compile_function(需求, examples, name="rank")  → 合成 + 验证 + 入库
-    get_code("rank")                              → 源码
-    call_function("rank", {...})                  → 在沙箱里跑一次
+    compile_function(requirement, examples, name="rank")  -> synthesise, verify, store
+    get_code("rank")                                      -> source
+    call_function("rank", {...})                          -> run it in the sandbox
 
-正确性由**调用方给的用例**保证。除此之外只有两道关：静态检查（生成的代码不该能
-读文件、不该能 import）和沙箱（它在你的机器上执行）。
+Correctness rests on **the test cases**. Beyond that there are only two gates: the
+static check (generated code must not read files or import anything) and the sandbox
+(it runs on your machine).
 """
 from .types import Example, GateResult, Level, Report, Spec
 from .registry import Function, Registry, TestSet, Version

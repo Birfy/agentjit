@@ -1,7 +1,7 @@
 [project]
 name = "agentjit"
 version = "0.1.0"
-description = "把文本需求编译成可复用的、经过验证的沙箱函数"
+description = "Compile a plain-text requirement into a reusable, verified, sandboxed function"
 requires-python = ">=3.11"
 dependencies = ["coverage>=7.4", "jsonschema>=4.21"]
 

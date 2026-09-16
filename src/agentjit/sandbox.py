@@ -1,8 +1,10 @@
-"""沙箱执行（父进程侧）。
+"""Sandboxed execution, parent side.
 
-M0 用子进程 + 受限 builtins + rlimit。这**足以隔离错误，不足以隔离攻击者** ——
-它是一个正确性沙箱，不是安全沙箱。真正的安全加固（容器 / seccomp / microVM）
-是 M2，接口留了 `python` 参数可以换后端。见 docs/design.md 开放问题 3。
+A subprocess plus restricted builtins plus rlimit. That is **enough to contain a bug,
+not enough to contain an attacker** — this is a correctness sandbox, not a security
+one. Real hardening (container / seccomp / microVM) is later work; the `python`
+parameter is the seam where a different backend goes. See docs/design.md, open
+question 3.
 """
 from __future__ import annotations
 
@@ -33,10 +35,10 @@ class CallResult:
 
 @dataclass
 class RunResult:
-    ok: bool                                  # 进程层面是否正常完成
+    ok: bool                                  # did the process itself finish normally
     results: list[CallResult] = field(default_factory=list)
     coverage: dict[str, Any] | None = None
-    load_error: str = ""                      # 代码本身加载/编译失败
+    load_error: str = ""                      # the code failed to load or compile
     timed_out: bool = False
     killed: str = ""                          # "timeout" | "memory" | "signal:SIGxxx"
     wall_ms: float = 0.0
@@ -48,18 +50,18 @@ class RunResult:
     @property
     def why_dead(self) -> str:
         if self.killed == "timeout":
-            return "执行超时"
+            return "timed out"
         if self.killed == "memory":
-            return "内存超限被杀"
+            return "killed: over the memory limit"
         if self.killed:
-            return f"被信号杀死（{self.killed.split(':')[-1]}）"
+            return f"killed by a signal ({self.killed.split(':')[-1]})"
         if self.load_error:
-            return "加载失败: " + self.load_error.strip().splitlines()[-1][:200]
+            return "failed to load: " + self.load_error.strip().splitlines()[-1][:200]
         return ""
 
 
 def _rss_kb(pid: int) -> int:
-    """读子进程常驻内存。Linux 走 /proc（便宜），其余平台退回 ps。"""
+    """Read the child's resident memory: /proc on Linux (cheap), `ps` elsewhere."""
     try:
         with open(f"/proc/{pid}/statm") as fh:
             return int(fh.read().split()[1]) * (os.sysconf("SC_PAGE_SIZE") // 1024)
@@ -74,10 +76,11 @@ def _rss_kb(pid: int) -> int:
 
 
 class _MemoryWatchdog(threading.Thread):
-    """macOS 直接忽略 RLIMIT_AS，所以内存上限只能在父进程这边盯。
+    """macOS ignores RLIMIT_AS outright, so the memory ceiling has to be watched here.
 
-    不盯不行：变异测试会并发跑几十个沙箱，生成代码里一个手滑的 range(10**9)
-    就足以把开发机拖死。
+    It has to be watched: a single slip of the finger in generated code — `range(10**9)`
+    — is enough to bring a development machine to its knees, and verification runs
+    several sandboxes concurrently.
     """
 
     def __init__(self, proc: subprocess.Popen, mem_mb: int, interval: float = 0.1):
@@ -125,8 +128,9 @@ class Sandbox:
                 "timeout_ms": timeout_ms,
                 "mem_mb": mem_mb,
             })
-            # -I: 隔离模式。忽略 PYTHON* 环境变量、不加载用户 site、
-            # 不把脚本目录放进 sys.path（所以 _child.py 必须自包含）。
+            # -I: isolated mode. Ignores PYTHON* environment variables, skips the user
+            # site directory, and keeps the script's own directory off sys.path — which
+            # is why _child.py has to be self-contained.
             proc = subprocess.Popen(
                 [self.python, "-I", str(_CHILD)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -149,19 +153,19 @@ class Sandbox:
             return RunResult(ok=False, timed_out=True, killed="timeout", wall_ms=wall)
         if dog.tripped:
             return RunResult(ok=False, killed="memory", wall_ms=wall,
-                             load_error=f"常驻内存超过 {mem_mb}MB")
+                             load_error=f"resident memory went over {mem_mb}MB")
         if proc.returncode and proc.returncode < 0:
             name = signal.Signals(-proc.returncode).name
             return RunResult(ok=False, killed=f"signal:{name}", wall_ms=wall,
-                             load_error=f"子进程被 {name} 杀死\n{err[-1000:]}")
+                             load_error=f"the child was killed by {name}\n{err[-1000:]}")
         if proc.returncode != 0 or not out.strip():
             return RunResult(ok=False, wall_ms=wall,
-                             load_error=(err or "子进程无输出")[-2000:])
+                             load_error=(err or "the child produced no output")[-2000:])
         try:
             payload = json.loads(out)
         except json.JSONDecodeError:
             return RunResult(ok=False, wall_ms=wall,
-                             load_error=f"子进程输出不是 JSON: {out[:500]!r}")
+                             load_error=f"the child's output was not JSON: {out[:500]!r}")
 
         return RunResult(
             ok=payload["ok"],
@@ -174,6 +178,6 @@ class Sandbox:
         )
 
     def run_many(self, jobs: list[dict[str, Any]], workers: int = 8) -> list[RunResult]:
-        """并发跑多个变体。变异测试要跑几十个变异体，串行会慢一个数量级。"""
+        """Run several jobs concurrently."""
         with cf.ThreadPoolExecutor(max_workers=workers) as pool:
             return list(pool.map(lambda j: self.run(**j), jobs))

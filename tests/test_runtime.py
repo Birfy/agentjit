@@ -1,7 +1,8 @@
-"""call_function 的测试 —— 入参 guard → 沙箱 → 返回 schema。
+"""Tests for call_function — input guard -> sandbox -> return schema.
 
-第一性质（design.md §4.2）：**永远不抛给调用方一个"看起来成功但其实错了"的结果。**
-下面每一条都在问同一件事的一个侧面：什么该拦，以及批量里出事怎么归因。
+The first property (design.md §4.2): **never hand the caller a result that looks like a
+success but is wrong.** Every test below asks one facet of the same question: what gets
+stopped, and who gets blamed when something goes wrong inside a batch.
 """
 import pytest
 
@@ -9,7 +10,8 @@ from agentjit import Example, Level, Registry, Report, Runtime, Sandbox, Spec
 from agentjit.runtime import UnknownHandle
 from agentjit.types import GateResult
 
-REQ = "把 {name, score} 按 score 降序排名次，同分并列同一名次"
+REQ = ("Rank {name, score} records by descending score. "
+       "Records with the same score share a rank.")
 
 SPEC = Spec(
     intent=REQ,
@@ -51,7 +53,7 @@ ARGS = {"records": [{"name": "x", "score": 3}, {"name": "y", "score": 7}]}
 
 
 def _report():
-    return Report(level=Level.VERIFIED, gates=[GateResult("static", True, "通过")])
+    return Report(level=Level.VERIFIED, gates=[GateResult("static", True, "passed")])
 
 
 @pytest.fixture
@@ -63,7 +65,7 @@ def install(rt, code=GOOD, *, examples=EXAMPLES, spec=SPEC):
     return rt.reg.put(REQ, spec, code, _report(), examples).handle
 
 
-# --- 正常路径 --------------------------------------------------------------
+# --- the happy path --------------------------------------------------------------
 def test_call_returns_the_result(rt):
     h = install(rt)
     out = rt.call(h, ARGS)
@@ -72,8 +74,9 @@ def test_call_returns_the_result(rt):
 
 
 def test_calling_never_writes_to_disk(rt):
-    """调用是纯读。早先它要记调用次数、算省了多少 token、连续失败就隔离版本 ——
-    那套东西让"调一次函数"变成了有状态操作，而它需要真实流量才有意义。"""
+    """Calling is a pure read. It used to count calls, compute tokens saved, and
+    quarantine a version after repeated failures — machinery that made "call a function"
+    a stateful operation, and that only means anything under real traffic."""
     h = install(rt)
     before = sorted(p.stat().st_mtime_ns for p in rt.reg.root.rglob("*") if p.is_file())
     rt.call_many(h, [ARGS] * 3)
@@ -85,10 +88,10 @@ def test_unknown_handle_is_an_error_not_a_none(rt):
         rt.call("fn_deadbeef", ARGS)
 
 
-# --- 入参 guard ------------------------------------------------------------
+# --- the input guard ------------------------------------------------------------
 def test_bad_input_is_rejected_before_the_sandbox(rt):
     h = install(rt)
-    out = rt.call(h, {"records": "不是数组"})
+    out = rt.call(h, {"records": "not an array"})
 
     assert not out.ok and out.kind == "guard_failed"
     assert "param_schema" in out.message
@@ -96,7 +99,7 @@ def test_bad_input_is_rejected_before_the_sandbox(rt):
 
 
 
-# --- 算得到实现头上的失败 --------------------------------------------------
+# --- failures that belong to the implementation --------------------------------------------------
 BOOM = 'def solve(params, ctx):\n    return [1 / len(params["records"])]\n'
 
 
@@ -107,8 +110,9 @@ def test_runtime_error_is_reported_not_swallowed(rt):
 
 
 def test_return_schema_violation_blocks(rt):
-    """返回 schema 不是猜的，是从例子结构反推的。所以它阻断 ——
-    放一个不合契约的结果出去，就是"看起来成功但其实错了"。"""
+    """The return schema is not a guess; it is inferred from the shape of the
+    examples. So it blocks — letting a result out that breaks the contract is exactly
+    "looks like a success but is wrong"."""
     h = install(rt, 'def solve(params, ctx):\n    return {"nope": 1}\n')
     out = rt.call(h, ARGS)
     assert not out.ok and out.kind == "postcondition_failed"
@@ -117,10 +121,11 @@ def test_return_schema_violation_blocks(rt):
 
 
 
-# --- 批量 ------------------------------------------------------------------
+# --- batching ------------------------------------------------------------------
 def test_one_poisonous_input_does_not_condemn_its_batch(rt):
-    """超时会把整个沙箱进程带走。不重放的话，同批次几十个无辜的调用会一起被
-    判成 budget_exceeded —— 错误的归因比错误本身更贵。"""
+    """A timeout takes the whole sandbox process with it. Without a replay, the dozens
+    of innocent calls in the same batch are all condemned as budget_exceeded — and the
+    wrong attribution costs more than the failure itself."""
     code = ('def solve(params, ctx):\n'
             '    while len(params["records"]) == 3:\n'
             '        pass\n'

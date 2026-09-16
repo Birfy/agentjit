@@ -1,9 +1,9 @@
 {
   "name": "11_memory_bomb",
-  "why": "沙箱关卡：预分配写错数量级 —— Linux 靠 RLIMIT_AS，macOS 忽略它，靠看门狗",
+  "why": "sandbox gate: preallocation off by orders of magnitude — RLIMIT_AS on Linux, watchdog on macOS",
   "impl": "impl.py",
   "spec": {
-    "intent": "把行按 type 分组对 amount 求和；amount 可能带货币符号和千分位逗号，空值按 0 算",
+    "intent": "group rows by type and sum amount; amount may carry a currency symbol and thousands separators, blank counts as 0",
     "param_schema": {
       "type": "object",
       "properties": {
@@ -63,7 +63,7 @@
       },
       "output": {},
       "boundary": true,
-      "note": "空输入"
+      "note": "empty input"
     },
     {
       "input": {
@@ -78,7 +78,7 @@
         "sale": 0.0
       },
       "boundary": true,
-      "note": "空金额按 0 算"
+      "note": "blank amount counts as 0"
     },
     {
       "input": {
@@ -110,7 +110,7 @@
         "fee": -25.5
       },
       "boundary": true,
-      "note": "负数"
+      "note": "negative"
     }
   ],
   "expect": {

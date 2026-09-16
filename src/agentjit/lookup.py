@@ -1,20 +1,27 @@
-"""三级查找。见 [design.md §6.1](../../docs/design.md#61-规格归一化缓存的-key-不是原文)。
+"""Three-level lookup. See design.md §6.1.
 
-    L1 spec_hash 精确匹配 → L2 候选检索 + **用本次例子复验** → L3 miss，去合成。
+    L1 exact spec_hash -> L2 candidate retrieval + **re-run this run's examples**
+    -> L3 miss, go synthesise.
 
-**最要紧的一条结论放在最前面：检索质量只影响命中率，不影响正确性。**
+**The most important conclusion first: retrieval quality affects the hit rate, not
+correctness.**
 
-L2 命中必须用本次请求的例子跑一遍复验，跑不过就当 miss。所以检索可以很土 ——
-土的检索只是少命中几次，绝不会交出一个错的函数。design.md §6.1 说 L2 用向量近邻，
-这里先用**字符二元组重合度**顶着：中文没有现成的分词，字符 n-gram 是这个量级下
-最靠谱的土办法，而且不需要网络、不花 token。向量索引是 registry 大到线性扫不动
-之后的优化，不是正确性机制 —— 把这两件事分清楚，L2 就不吓人了。
+An L2 hit *must* re-run the requesting caller's examples against the candidate; if they
+fail it is treated as a miss. So retrieval is allowed to be crude — crude retrieval
+just misses a few hits, it can never hand back a wrong function. design.md §6.1 calls
+for vector nearest-neighbour here; this uses **character-bigram overlap** instead, which
+needs no network and costs no tokens. A vector index is an optimisation for when the
+registry outgrows a linear scan, not a correctness mechanism — keep those two apart and
+L2 stops being scary.
 
-和文档字面不同的一处：**L1 命中也复验。** 文档说 L1"直接用"。但复验只要一次沙箱
-运行、不花 token，而它挡住的是一个真实场景：同一段需求文本，调用方这次带来的
-例子和上次不一样（上次的期望本身写错了，或者需求被重新理解了）。这时候直接用
-旧版本，就是拿一个已知不满足本次判据的实现去交差。复验不过就合成新版本 ——
-design.md §4.1 的 `reused_with_new_version` 说的正是这件事。
+One deliberate departure from the doc: **an L1 hit is re-verified too.** The doc says L1
+can be used directly. But re-verification is one sandbox run and no tokens, and it
+catches a real situation: the same requirement text, but the examples the caller brings
+this time differ from last time (last time's expectation was wrong, or the requirement
+has been re-understood). Serving the stored version then means shipping an
+implementation already known not to satisfy the current criteria. If re-verification
+fails, synthesise a new version — which is exactly what design.md §4.1 calls
+`reused_with_new_version`.
 """
 from __future__ import annotations
 
@@ -29,21 +36,30 @@ from .registry import Function, Registry, Version, spec_hash
 from .sandbox import Sandbox
 from .types import Example, Spec, deep_equal
 
-# 相似度低于这个数的候选连复验都不值得跑。宁可漏 —— 漏了只是去合成一次，
-# 而每个候选的复验都要起一次沙箱。
+# Candidates below this are not even worth looking at. Prefer missing one — a miss just
+# means synthesising.
+#
+# **The floor is script-dependent, so do not read it as "unrelated requirements stop
+# here".** Measured on the same pair of requirements: in Chinese two unrelated ones score
+# ~0.03 and a genuine rewrite ~0.29-0.41; in English the shared-bigram floor alone puts
+# unrelated ones at ~0.21-0.28 and rewrites at ~0.51-0.54. No single number separates
+# both. So this is a ranking and cost knob, nothing more — what keeps an unrelated
+# candidate cheap is the schema check below (it never reaches the sandbox), and what
+# keeps it *wrong-free* is re-verification.
 MIN_SIMILARITY = 0.20
 
-# 最多复验几个候选。按相似度降序取前几个。
+# How many candidates to re-verify, taken in descending similarity order.
 MAX_CANDIDATES = 5
 
 _PUNCT = re.compile(r"[\s　-〿＀-￯!-/:-@\[-`{-~]+")
 
 
 def normalize(text: str) -> str:
-    """把一句需求压成可比较的形式。
+    """Reduce a requirement to something comparable.
 
-    NFKC（全角半角、兼容字符）→ 小写 → 去掉所有标点和空白。做不了的是语义：
-    "求和"和"求总额"在这里仍然是两个串。那一层交给复验，不交给字符串。
+    NFKC (width and compatibility forms), lowercase, strip all punctuation and
+    whitespace. What it cannot do is meaning: "total" and "sum" are still two different
+    strings here. That layer is handled by re-verification, not by string comparison.
     """
     return _PUNCT.sub("", unicodedata.normalize("NFKC", text).lower())
 
@@ -56,7 +72,7 @@ def bigrams(text: str) -> set[str]:
 
 
 def similarity(a: str, b: str) -> float:
-    """Dice 系数。两句话完全一样是 1，毫无重合是 0。"""
+    """Dice coefficient: 1 when identical, 0 when nothing overlaps."""
     x, y = bigrams(a), bigrams(b)
     if not x or not y:
         return 1.0 if x == y else 0.0
@@ -70,22 +86,24 @@ def _fits(value: Any, schema: dict) -> str:
     except jsonschema.ValidationError as e:
         return f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}"
     except jsonschema.SchemaError as e:
-        return f"schema 本身有问题: {e.message}"
+        return f"the schema itself is invalid: {e.message}"
 
 
 def schema_compatible(spec: Spec, examples: list[Example]) -> str:
-    """本次的例子能不能套进候选的 schema。空字符串 = 能。
+    """Do this run's examples fit the candidate's schema? Empty string means yes.
 
-    用本次例子去验候选的 schema，而不是比较两份 schema 的结构 —— 后者要定义
-    "兼容"是什么意思，前者直接问了真正要回答的问题：这些输入喂进去合法吗。
-    而且它和运行时那道入参 guard 用的是同一把尺子，不会出现"查找说兼容、
-    调用时被 guard 拦下"这种自相矛盾。
+    This validates the examples against the candidate's schema rather than comparing the
+    two schemas structurally. The latter would need a definition of "compatible"; this
+    asks the question that actually matters — are these inputs legal? It is also the
+    same yardstick the runtime input guard uses, so you can never get the contradiction
+    where lookup calls it compatible and the guard then rejects the call.
     """
     for i, ex in enumerate(examples):
         if msg := _fits(ex.input, spec.param_schema):
-            return f"例 {i} 的输入不合候选的 param_schema —— {msg}"
+            return f"example {i}: input does not match the candidate param_schema: {msg}"
         if msg := _fits(ex.output, spec.return_schema):
-            return f"例 {i} 的期望输出不合候选的 return_schema —— {msg}"
+            return (f"example {i}: expected output does not match the candidate "
+                    f"return_schema: {msg}")
     return ""
 
 
@@ -102,9 +120,11 @@ class Candidate:
         return self.verdict == "hit"
 
     def render(self) -> str:
-        tag = {"hit": "命中", "schema": "schema 不兼容", "reverify": "复验没过",
-               "pending": "没轮到"}.get(self.verdict, self.verdict)
-        line = f"  {self.fn.handle}@{self.version.name}  相似度 {self.similarity:.2f}  {tag}"
+        tag = {"hit": "hit", "schema": "schema mismatch",
+               "reverify": "failed re-verification",
+               "pending": "not reached"}.get(self.verdict, self.verdict)
+        line = (f"  {self.fn.ref}@{self.version.name}  "
+                f"similarity {self.similarity:.2f}  {tag}")
         return line + (f"\n      {self.why}" if self.why else "")
 
 
@@ -114,15 +134,15 @@ class Lookup:
     fn: Function | None = None
     version: Version | None = None
     candidates: list[Candidate] = field(default_factory=list)
-    stale: Function | None = None            # L1 命中了但复验没过的那个函数
+    stale: Function | None = None            # an L1 hit whose re-verification failed
 
     @property
     def hit(self) -> bool:
         return self.fn is not None
 
     def render(self) -> str:
-        head = (f"{self.level} 命中 {self.fn.handle}@{self.version.name}" if self.hit
-                else f"{self.level}：没有可用的现成函数")
+        head = (f"{self.level} hit: {self.fn.ref}@{self.version.name}" if self.hit
+                else f"{self.level}: nothing reusable found")
         if not self.candidates:
             return head
         return head + "\n" + "\n".join(c.render() for c in self.candidates)
@@ -138,20 +158,21 @@ def find(
     min_similarity: float = MIN_SIMILARITY,
     max_candidates: int = MAX_CANDIDATES,
 ) -> Lookup:
-    """查一遍缓存。**只读** —— 命中之后要记的账由调用方落盘（见 jit.py）。"""
+    """Search the cache. **Read-only** — booking a hit is the caller's job (see jit.py)."""
     sb = sandbox or Sandbox()
     own = spec_hash(requirement, spec)
 
-    # --- L1：同一个说法 ----------------------------------------------------
+    # --- L1: the same wording ----------------------------------------------------
     exact = reg.get(f"fn_{own}")
     if exact is not None and (v := exact.best()) is not None:
         cand = Candidate(exact, v, 1.0)
         if reverify(cand, examples, sb):
             return Lookup("L1", exact, v, [cand])
-        # 同一段需求，这次的例子和上次不一样 —— 旧版本已经不满足本次判据了
+        # Same requirement text, different examples this time — the stored version no
+        # longer satisfies the criteria being asked for
         return Lookup("miss", candidates=[cand], stale=exact)
 
-    # --- L2：别的说法 ------------------------------------------------------
+    # --- L2: a different wording ---------------------------------------------------
     scored = []
     for fn in reg.all():
         if fn.spec_hash == own or (v := fn.best()) is None:
@@ -173,29 +194,30 @@ def find(
 
 
 def reverify(cand: Candidate, examples: list[Example], sb: Sandbox) -> bool:
-    """[design.md §6.2](../../docs/design.md#62-例子即规格--本设计的核心主张) 里那道免费的 guard。
+    """The free guard from design.md §6.2.
 
-    拿本次调用方自己的例子跑候选一遍。用的是调用方的标准，不是我们的 ——
-    所以"求和"的函数遇到"求平均"的例子必然挂，两个在嵌入空间里挨得多近都没用。
+    Run the candidate against the caller's own examples. The yardstick is the caller's,
+    not ours — so a "sum" function handed "average" examples fails, no matter how close
+    the two sit in embedding space.
     """
     if not examples:
-        cand.verdict, cand.why = "reverify", "本次没给例子，复验无从谈起"
+        cand.verdict, cand.why = "reverify", "no examples supplied, nothing to re-verify against"
         return False
 
     spec = cand.fn.spec
     run = sb.run(cand.version.code, spec.entry, [e.input for e in examples],
                  timeout_ms=spec.timeout_ms, mem_mb=spec.mem_mb)
     if why := run.why_dead:
-        cand.verdict, cand.why = "reverify", f"候选跑不起来：{why}"
+        cand.verdict, cand.why = "reverify", f"the candidate would not run: {why}"
         return False
 
     for i, (ex, r) in enumerate(zip(examples, run.results)):
         if not r.ok:
-            cand.verdict, cand.why = "reverify", f"例 {i} 崩了：{r.error}"
+            cand.verdict, cand.why = "reverify", f"example {i} raised: {r.error}"
             return False
         if not deep_equal(r.value, ex.output):
             cand.verdict, cand.why = "reverify", (
-                f"例 {i} 对不上：期望 {ex.output!r}，实际 {r.value!r}")
+                f"example {i} disagrees: expected {ex.output!r}, got {r.value!r}")
             return False
 
     cand.verdict = "hit"
@@ -203,10 +225,11 @@ def reverify(cand: Candidate, examples: list[Example], sb: Sandbox) -> bool:
 
 
 def search(reg: Registry, query: str, limit: int = 10) -> list[Candidate]:
-    """`search_functions` —— 写需求之前先看看有没有现成的。
+    """`search_functions` — see whether something already exists.
 
-    只排序不复验：这里回答的是"有没有像的"，不是"能不能用"。
-    后者要例子，而 search 的调用方还没写例子。
+    Ranking only, no re-verification: this answers "is there anything similar", not
+    "can I use it". The latter needs examples, and whoever calls `search` has not
+    written them yet.
     """
     out = []
     for fn in reg.all():

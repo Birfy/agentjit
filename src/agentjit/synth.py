@@ -1,11 +1,14 @@
-"""合成循环：生成 → 静态检查 → 跑用例 → 结构化反馈 → 再生成，至多三次。
+"""The synthesis loop: write, static-check, run the cases, feed the failure back,
+write again — at most three times.
 
-**反馈必须结构化。** "第 2 个例子期望 `{"sale": 300.0}` 实际 `{"sale": "300"}`"
-能让模型一次修对；"没通过，再试试"只会让它随机重写。
+**The feedback has to be structured.** "case 2 expected `{"sale": 300.0}`, got
+`{"sale": "300"}`" lets the model fix it in one shot; "didn't pass, try again" just
+makes it rewrite at random.
 
-早先这里还有保留集：把 30% 的用例藏起来不给修复循环看，防的是模型写出
-`if input == X: return Y`。连同轮换机制一起删掉了 —— 正确性现在由调用方的
-用例保证，模型能看见全部用例。**真要出问题多半出在这里**，`git log` 里能找回来。
+There used to be a hold-out split here: 30% of the cases hidden from the repair loop,
+to stop the model writing `if input == X: return Y`. It was removed along with the
+rotation logic — correctness now rests on the caller's cases, and the model sees all
+of them. **If something goes wrong, this is the most likely place**; `git log` has it.
 """
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ _FENCE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.S)
 class Attempt:
     n: int
     code: str
-    gate: str = ""          # 挂掉的关卡；"" = 通过
+    gate: str = ""          # the gate that failed; "" means it passed
     summary: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -55,30 +58,30 @@ class SynthResult:
     def render(self) -> str:
         lines = []
         for a in self.attempts:
-            tag = "通过" if not a.gate else f"{a.gate} —— {a.summary}"
-            lines.append(f"  尝试 {a.n}  {tag}")
+            tag = "passed" if not a.gate else f"{a.gate} — {a.summary}"
+            lines.append(f"  attempt {a.n}  {tag}")
         if self.report:
             lines.append("")
             lines.append("  " + self.report.render().replace("\n", "\n  "))
         lines.append("")
-        lines.append(f"结论: {'成功' if self.ok else '失败'}　"
-                     f"token {self.input_tokens}in/{self.output_tokens}out")
+        lines.append(f"result: {'ok' if self.ok else 'failed'}   "
+                     f"tokens {self.input_tokens}in/{self.output_tokens}out")
         if self.reason:
             lines.append(self.reason)
         if self.review:
-            lines.append("需人工过目: " + "；".join(self.review))
+            lines.append("needs a human look: " + "; ".join(self.review))
         return "\n".join(lines)
 
 
 def extract_code(text: str, entry: str = "solve") -> str:
-    """从回复里取出代码。优先取含入口函数的代码块。"""
+    """Pull the code out of the reply, preferring the block with the entry function."""
     blocks = [b.strip() for b in _FENCE.findall(text)]
     for b in blocks:
         if f"def {entry}" in b:
             return b
     if blocks:
         return blocks[0]
-    if f"def {entry}" in text:                     # 没加围栏但确实是代码
+    if f"def {entry}" in text:                     # unfenced, but it really is code
         try:
             ast.parse(text)
             return text.strip()
@@ -88,10 +91,10 @@ def extract_code(text: str, entry: str = "solve") -> str:
 
 
 def spec_for(requirement: str, examples: list[Example], entry: str = "solve") -> Spec:
-    """从需求和例子推出规格。
+    """Derive the spec from the requirement and examples.
 
-    单独拆出来是因为查找要用：缓存的 key 里有 schema，所以得先有规格才能去查，
-    而查中了就根本不用合成。
+    Split out because lookup needs it: the cache key includes the schema, so you need
+    a spec before you can search — and a hit means you never synthesise at all.
     """
     pschema, rschema = spec_schemas(examples)
     return Spec(intent=requirement.strip().splitlines()[0][:160],
@@ -122,15 +125,16 @@ def compile_function(
 
 
 def _repair(requirement, spec, examples, client, sb, th, max_attempts, attempts):
-    """至多试 max_attempts 次，每次把上一次的具体失败喂回去。
+    """Try at most `max_attempts` times, feeding each specific failure back in.
 
-    返回 (code, report, failure_reason)。通过的那一次的报告直接带出去 ——
-    早先外面还要再验一遍（那时外面跑的是带保留集和变异测试的终审，和循环里
-    那道不是同一回事）。现在两边一模一样，再验一遍纯属多跑一次沙箱。
+    Returns (code, report, failure_reason). The passing run's report is handed straight
+    out — the caller used to verify again, back when the outer pass was a different,
+    heavier check (hold-out plus mutation testing). The two are identical now, so a
+    second pass would just be one more sandbox run.
 
-    **失败时也带报告出去**：上面那层要看最后一次挂在哪几条用例上，才能判断
-    该怪代码还是怪用例（jit.py 的 `_blame`）。只给一句 reason 的话，
-    那个判断就做不了了。
+    **The report comes out on failure too**: the layer above needs to see which cases
+    the last attempt failed on, to decide whether to blame the code or the cases
+    (`_blame` in jit.py). A bare reason string makes that call impossible.
     """
     feedback, last, last_rep = "", None, None
     for n in range(1, max_attempts + 1):
@@ -139,20 +143,20 @@ def _repair(requirement, spec, examples, client, sb, th, max_attempts, attempts)
             resp = client.complete(system=SYSTEM, user=user)
         except Refused as e:
             attempts.append(Attempt(n, "", "refused", str(e)))
-            return "", None, f"模型拒答：{e}"
+            return "", None, f"model refused: {e}"
 
         code = extract_code(resp.text, spec.entry)
         if not code:
-            attempts.append(Attempt(n, "", "no_code", "回复里没有代码块",
+            attempts.append(Attempt(n, "", "no_code", "no code block in the reply",
                                     resp.input_tokens, resp.output_tokens))
             feedback = render_feedback(resp.text[:600], "no_code",
-                                       "回复里找不到 ```python 代码块", {})
+                                       "no ```python block found in the reply", {})
             last = "no_code"
             continue
 
         rep = verify(code, spec, examples, thresholds=th, sandbox=sb)
         if not rep.failures:
-            attempts.append(Attempt(n, code, "", "全部用例通过",
+            attempts.append(Attempt(n, code, "", "all cases passed",
                                     resp.input_tokens, resp.output_tokens))
             return code, rep, ""
 
@@ -162,6 +166,7 @@ def _repair(requirement, spec, examples, client, sb, th, max_attempts, attempts)
         feedback = render_feedback(code, g.name, g.summary, g.detail)
         last, last_rep = g.name, rep
 
-    return "", last_rep, (f"{max_attempts} 次尝试都没通过，最后卡在 {last}。"
-                      "失败本身是有信息的 —— 多半说明这事不适合用代码做，"
-                      "或者需求/例子之间本身不自洽。")
+    return "", last_rep, (
+        f"None of the {max_attempts} attempts passed; the last one failed at {last}. "
+        "The failure itself is informative — usually it means this task is a poor fit "
+        "for generated code, or the requirement and the examples contradict each other.")

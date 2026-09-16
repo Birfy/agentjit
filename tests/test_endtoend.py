@@ -1,7 +1,7 @@
-"""闭环：一段话 → 合成 → 入库 → 按名字取代码 / 反复调用。
+"""The loop closed: a sentence -> synthesis -> storage -> fetch by name / call again.
 
-全程用脚本客户端，不打网络、不花 token —— 这里证明的是管道通了，
-不是"Haiku 真的几次能修对"。
+A scripted client throughout: no network, no tokens. What this proves is that the pipe
+is connected, not "how many attempts Haiku really needs".
 """
 import pytest
 
@@ -9,8 +9,9 @@ from agentjit import Example, Registry, Runtime, Sandbox, get_code
 from agentjit.llm import ScriptedClient
 from agentjit.synth import compile_function
 
-REQ = ("把行按 type 分组，对 amount 求和，返回 {type: 总额}。"
-       "amount 可能带货币符号和千分位逗号，空值按 0 算。")
+REQ = ("Group rows by type and sum the amounts, returning {type: total}. "
+       "An amount may carry a currency symbol and thousands separators; "
+       "an empty one counts as 0.")
 
 EXAMPLES = [
     Example({"rows": [{"type": "refund", "amount": "$1,200.50"},
@@ -23,7 +24,7 @@ EXAMPLES = [
     Example({"rows": [{"type": "fee", "amount": "-$25.50"}]}, {"fee": -25.5}, boundary=True),
 ]
 
-CORRECT = '''先清洗再累加。
+CORRECT = '''Clean each value first, then accumulate.
 
 ```python
 def solve(params, ctx):
@@ -55,17 +56,17 @@ def test_compile_then_get_and_call_by_name(tmp_path, sb):
     fn = reg.put(REQ, r.spec, r.code, r.report, EXAMPLES, name="group_sum",
                  model="scripted", attempts=len(r.attempts))
 
-    # 按名字取代码
+    # fetch the code by name
     assert "def solve" in get_code("group_sum", registry=reg)
     assert reg.get("group_sum").spec_hash == fn.spec_hash
 
-    # 按名字反复调用
+    # call it repeatedly by name
     args = {"rows": [{"type": "sale", "amount": f"${i}"} for i in range(1, 6)]}
     outs = rt.call_many("group_sum", [args] * 200)
     assert all(o.ok for o in outs)
     assert outs[0].result == {"sale": 15.0}
 
-    # 落盘的是用例，不只是代码
+    # what lands on disk is the cases, not just the code
     back = reg.get("group_sum")
     assert len(back.tests.examples) == len(EXAMPLES)
     assert back.best().code.strip() == r.code.strip()
@@ -74,8 +75,9 @@ def test_compile_then_get_and_call_by_name(tmp_path, sb):
 
 
 def test_recompiling_the_same_requirement_adds_a_version_not_a_function(tmp_path, sb):
-    """同一个需求再编译一次，应该长出 v2，而不是第二个函数 ——
-    否则测试集会分叉成两份，"模型升级 = 免费的全库重生成"就没了依托。"""
+    """Compiling the same requirement again should grow a v2, not a second function —
+    otherwise the test set forks into two copies and "a better model means a free
+    regeneration of everything" loses the thing it rests on."""
     reg = Registry(tmp_path / "registry")
     for _ in range(2):
         r = compile_function(REQ, EXAMPLES, client=ScriptedClient([CORRECT]), sandbox=sb)

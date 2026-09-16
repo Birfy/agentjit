@@ -1,15 +1,19 @@
-"""验证：静态检查 → 跑调用方给的用例。
+"""Verification: static check, then run the caller's test cases.
 
-**正确性由调用方的测试用例保证。** 所以这里只有两件事：一件是安全的
-（生成的代码不该能读文件、不该能 import），一件是正确性的（它得通过你给的用例）。
+**Correctness comes from the test cases.** So there are only two things here: one for
+safety (generated code must not read files or import anything) and one for
+correctness (it must pass your cases).
 
-早先这里还有五道关卡 —— 保留集、分支覆盖、模糊测试、确定性、变异测试。它们回答
-的不是"这段代码对不对"，而是"你的用例够不够强"。那是**给调用方的建议，不是判定**，
-而且每次要多花 570ms。全部删掉了，`git log` 里能找回来。
+There used to be five more gates — a hold-out split, branch coverage, fuzzing,
+determinism, mutation testing. They did not answer "is this code correct", they
+answered "are your test cases strong enough". That is **advice for the caller, not a
+verdict**, and it cost 570ms on every run. All removed; `git log` has them.
 
-删掉的东西里有一条值得记着，将来真出问题多半是它：**保留集**（把 30% 的用例藏起来，
-修复循环看不到，最后才跑）挡的是"模型对着可见用例写 `if input == X: return Y`"。
-它不花额外 token。现在用例强度完全取决于调用方自觉。
+One of the deleted ones is worth remembering, because it is the most likely thing to
+need back: the **hold-out split** (hide 30% of the cases from the repair loop, run
+them only at the end) is what stops the model writing `if input == X: return Y`
+against the cases it can see. It costs no extra tokens. Right now the strength of
+the test cases rests entirely on the caller.
 """
 from __future__ import annotations
 
@@ -26,7 +30,8 @@ from .types import Example, GateResult, Level, Report, Spec, deep_equal
 
 @dataclass
 class Thresholds:
-    # 一个用例都没有就没法判定对错 —— 那种情况只能 EPHEMERAL，不进持久缓存。
+    # With no cases at all there is nothing to judge against — that can only ever be
+    # EPHEMERAL, and EPHEMERAL never reaches the persistent cache.
     min_examples: int = 1
 
 
@@ -37,16 +42,17 @@ def _schema_ok(value: Any, schema: dict) -> str:
     except jsonschema.ValidationError as e:
         return f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}"
     except jsonschema.SchemaError as e:
-        return f"schema 本身有问题: {e.message}"
+        return f"the schema itself is invalid: {e.message}"
 
 
 def _failures(run: RunResult, examples: list[Example]) -> list[dict]:
-    """不通过的用例。反馈必须结构化 —— 见 docs/design.md §6.3。
-    "输入 X 期望 Y 实际 Z" 能让模型一次修对，"没通过，再试试"只会让它随机重写。
+    """The cases that did not pass. Feedback has to be structured — see design.md §6.3.
+    "input X, expected Y, got Z" lets the model fix it in one shot; "didn't pass, try
+    again" just makes it rewrite at random.
 
-    每条带上 `origin`：调用方给的用例挂了就是代码错了，自动生成的用例挂了则
-    **可能是用例本身错的**。这个区别不在这里判，但判它的人需要这个字段
-    （见 jit.py 的 `_blame`）。
+    Each entry carries `origin`: a caller's case failing means the code is wrong, but a
+    *generated* case failing may mean **the case itself is wrong**. This is not the
+    place to decide that, but whoever does needs the field (see `_blame` in jit.py).
     """
     bad = []
     for i, (ex, r) in enumerate(zip(examples, run.results)):
@@ -75,29 +81,31 @@ def verify(
     def done(level: Level) -> Report:
         return Report(level=level, gates=gates, wall_ms=(time.perf_counter() - t0) * 1000)
 
-    # ---- 静态检查：最便宜的一道，不过的根本不进沙箱 ------------------------
+    # ---- static check: the cheapest gate; what fails here never enters the sandbox --
     violations = static_check.check(source, spec.entry)
     gates.append(GateResult("static", not violations,
-                            "通过" if not violations else f"{len(violations)} 项违规: {violations[0]}",
+                            "passed" if not violations
+                            else f"{len(violations)} violation(s): {violations[0]}",
                             {"violations": violations}))
     if violations:
         return done(Level.REJECTED)
 
-    # ---- 有没有判据 --------------------------------------------------------
+    # ---- is there anything to judge against? --------------------------------------
     enough = len(examples) >= th.min_examples
     gates.append(GateResult("examples.sufficiency", enough,
-                            f"{len(examples)} 个用例" if enough
-                            else "一个用例都没有 —— 判不了对错，只能 EPHEMERAL",
+                            f"{len(examples)} case(s)" if enough
+                            else "no test cases — nothing to judge against, EPHEMERAL only",
                             {"n": len(examples)}, blocking=False))
     if not enough:
-        # 跑一次确认它至少不崩，但不进持久缓存：拿不出判据的实现存下来，
-        # 就是把一个没人验过的东西摆上货架（design.md §8.1）。
+        # Run it once to confirm it at least loads, but keep it out of the persistent
+        # cache: storing an implementation nobody verified is putting an unchecked
+        # thing on the shelf (design.md §8.1).
         run = sb.run(source, spec.entry, [], timeout_ms=spec.timeout_ms, mem_mb=spec.mem_mb)
-        gates.append(GateResult("examples", not run.why_dead, run.why_dead or "跳过：没有用例",
-                                blocking=False))
+        gates.append(GateResult("examples", not run.why_dead,
+                                run.why_dead or "skipped: no test cases", blocking=False))
         return done(Level.EPHEMERAL if not run.why_dead else Level.REJECTED)
 
-    # ---- 跑用例：正确性就靠这一道 ------------------------------------------
+    # ---- run the cases: this one gate is what correctness rests on -----------------
     run = sb.run(source, spec.entry, [e.input for e in examples],
                  timeout_ms=spec.timeout_ms, mem_mb=spec.mem_mb)
     if why := run.why_dead:
@@ -107,18 +115,20 @@ def verify(
 
     bad = _failures(run, examples)
     gates.append(GateResult("examples", not bad,
-                            f"{len(examples) - len(bad)}/{len(examples)} 通过",
+                            f"{len(examples) - len(bad)}/{len(examples)} passed",
                             {"failures": bad}))
     if bad:
         return done(Level.REJECTED)
 
-    # ---- 返回值合不合契约 --------------------------------------------------
-    # schema 是从例子结构反推的，不是猜的。这道几乎不花时间，顺手做掉 ——
-    # 调用时还会再查一遍（runtime 的返回 guard），两边用的是同一把尺子。
+    # ---- does the return value honour the contract? --------------------------------
+    # The schema is inferred from the structure of the examples, not guessed. This costs
+    # almost nothing, so do it here too — the runtime checks it again on every call,
+    # using the same yardstick.
     off = [{"i": i, "value": r.value, "why": msg}
            for i, r in enumerate(run.results)
            if r.ok and (msg := _schema_ok(r.value, spec.return_schema))]
     gates.append(GateResult("return_schema", not off,
-                            "通过" if not off else f"{len(off)} 个返回值不合 return_schema",
+                            "passed" if not off
+                            else f"{len(off)} return value(s) do not match return_schema",
                             {"violations": off[:5]}))
     return done(Level.REJECTED if off else Level.VERIFIED)

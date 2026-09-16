@@ -1,4 +1,4 @@
-"""验证管线的数据模型。"""
+"""Data model for the verification pipeline."""
 from __future__ import annotations
 
 import math
@@ -8,36 +8,39 @@ from typing import Any
 
 
 class Level(str, Enum):
-    """验证结论。
+    """The verdict.
 
-    只有三档，因为只问三个问题：进得了沙箱吗、有判据吗、过了吗。
-    （早先还有个 CONFIRMED，留给"调用方确认的变形性质"—— 那套机制删掉了，
-    枚举值也就跟着删了，免得留一个任何代码路径都产不出来的档位。）
+    Three levels, because there are only three questions: does it get into the sandbox,
+    is there anything to judge it against, and did it pass? (There used to be a
+    CONFIRMED level for caller-confirmed metamorphic properties; that machinery was
+    removed, so the value went with it rather than sit there unreachable.)
     """
 
-    REJECTED = "REJECTED"        # 静态检查没过，或者用例没过
-    EPHEMERAL = "EPHEMERAL"      # 能跑，但没有用例可判 —— 不进持久缓存
-    VERIFIED = "VERIFIED"        # 通过了调用方给的全部用例
+    REJECTED = "REJECTED"        # failed the static check, or failed a test case
+    EPHEMERAL = "EPHEMERAL"      # runs, but nothing to judge it by — never cached
+    VERIFIED = "VERIFIED"        # passed every test case
 
 
 @dataclass
 class Example:
-    """一组输入/输出判据。"""
+    """One input/output criterion."""
 
     input: dict[str, Any]
     output: Any
     note: str = ""
-    boundary: bool = False       # 只是个标注，方便人看；不再影响判定
-    # 这条判据是谁给的。用例只增不减，一年后回头看"这个期望值凭什么是它"，
-    # 唯一能回答的就是出处。
+    boundary: bool = False       # a label for humans; it does not affect the verdict
+    # Where this criterion came from. Cases only accumulate, and a year from now the
+    # only thing that can answer "why is this the expected value" is its provenance.
     origin: str = "caller"       # caller | generated | reverify | manual
-    # 这条期望值建立在需求**没有说明**的某个决定上，比如"0.5 往上还是往下取整"。
-    # 空串 = 期望值直接来自需求原文。
+    # This expectation rests on a decision the requirement **did not make** — for
+    # instance which way 0.5 rounds. Empty string means it follows from the text.
     #
-    # 加这个字段是被实测逼出来的：给一句含糊的"把一串记录去重"，模型会把
-    # "整条比较""保留第一条""保持原顺序"三个需求里根本没提的决定，当成确定的
-    # 事实写进用例。那条用例之后就是判据 —— 调用方要是另一种读法，
-    # 正确的实现会被判死。所以假设必须**记下来并且说出来**，不能藏在期望值里。
+    # The field exists because measurement forced it: given a vague "deduplicate a list
+    # of records", the model wrote "compare whole records", "keep the first", and
+    # "preserve order" into its cases as settled fact, when the requirement said none
+    # of them. Those cases then become criteria — and a caller who read it the other way
+    # has their correct implementation condemned. So an assumption has to be **recorded
+    # and stated**, not buried inside an expected value.
     assumes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,7 +57,7 @@ class Example:
 
 @dataclass
 class Spec:
-    """一个待验证函数的规格。M0 只覆盖纯函数。"""
+    """The spec of a function to be verified. Pure functions only, for now."""
 
     intent: str
     param_schema: dict[str, Any]
@@ -75,13 +78,13 @@ class Spec:
 
 @dataclass
 class GateResult:
-    """一道关卡的结论。"""
+    """The verdict from one gate."""
 
     name: str
     passed: bool
     summary: str
     detail: dict[str, Any] = field(default_factory=dict)
-    blocking: bool = True        # False = 警告性关卡，不阻断（见 correctness.md §4.2）
+    blocking: bool = True        # False = advisory only, does not fail the run
 
     @property
     def icon(self) -> str:
@@ -101,7 +104,7 @@ class GateResult:
 
 @dataclass
 class Report:
-    """一次完整验证的结论。"""
+    """The verdict from a full verification run."""
 
     level: Level
     gates: list[GateResult] = field(default_factory=list)
@@ -118,7 +121,7 @@ class Report:
         w = max((len(g.name) for g in self.gates), default=0)
         lines = [f"{g.icon}  {g.name.ljust(w)}  {g.summary}" for g in self.gates]
         lines.append("")
-        lines.append(f"级别: {self.level.value}   耗时: {self.wall_ms:.0f}ms")
+        lines.append(f"level: {self.level.value}   took: {self.wall_ms:.0f}ms")
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
@@ -132,8 +135,9 @@ class Report:
 
 
 def deep_equal(a: Any, b: Any, rel_tol: float = 1e-9, abs_tol: float = 1e-12) -> bool:
-    """比较两个 JSON 值。数值给容差 —— 生成的代码用浮点算钱是常态，
-    要求 bit 级相等会把正确的实现判错。"""
+    """Compare two JSON values, with a tolerance on numbers — generated code does money
+    arithmetic in floats all the time, and demanding bit equality condemns correct
+    implementations."""
     if isinstance(a, bool) or isinstance(b, bool):
         return a is b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):

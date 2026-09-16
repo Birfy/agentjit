@@ -1,9 +1,9 @@
 {
   "name": "09_insufficient",
-  "why": "判据不足：代码没问题，但一个用例都不给，就没法判对错 —— 不进缓存",
+  "why": "no criteria: the code is fine, but with no test cases there is nothing to judge — not cached",
   "impl": "impl.py",
   "spec": {
-    "intent": "把行按 type 分组对 amount 求和；amount 可能带货币符号和千分位逗号，空值按 0 算",
+    "intent": "group rows by type and sum amount; amount may carry a currency symbol and thousands separators, blank counts as 0",
     "param_schema": {
       "type": "object",
       "properties": {

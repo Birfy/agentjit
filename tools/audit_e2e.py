@@ -1,20 +1,23 @@
-"""端到端审计：**agentjit 产出的函数，到底对不对。**
+"""The end-to-end audit: **is the function agentjit produces actually correct?**
 
-前一个脚本（audit_tests.py）验的是"补出来的用例对不对"。这个验的是最终产物 ——
-而且用的是一个**管道完全没见过**的判据：
+The other script (audit_tests.py) checks whether the generated cases are right. This one
+checks the final product, against a yardstick **the pipeline has never seen**:
 
-    tools/audit_tests.py 里那 6 个参考实现，我按需求原文直译写的，
-    写的时候没见过任何生成用例、也没见过任何生成代码。
+    the six reference implementations in tools/audit_tests.py, transcribed literally
+    from the requirement text, written before any generated case or any generated code
+    existed.
 
-拿它当标准答案，对编译出来的代码跑 200 个随机输入。这才是真正要回答的问题：
-**"agentjit 产出的函数正确吗"**，而不是"它产出的函数能通过它自己写的测试吗"。
+Take that as the answer key and run 200 random inputs through the compiled code. This is
+the question that actually matters -- **"is the function agentjit produced correct"**,
+not "does the function it produced pass the tests it wrote itself".
 
-后者过了前者不过 = 生成的用例太弱，漏掉了真 bug。
-前者过了后者不过 = 生成的用例算错了，把正确代码判死了。两种都要看得见。
+Passing its own tests but failing here = the generated cases are too weak and missed a
+real bug. Failing its own tests but passing here = a generated case had a wrong
+expectation and condemned correct code. Both need to be visible.
 
-    python tools/audit_e2e.py            # 全部 6 个
-    python tools/audit_e2e.py topn split # 只跑指定的
-    python tools/audit_e2e.py --rounds 3 # 同一个需求跑几轮，看方差
+    python tools/audit_e2e.py            # all six
+    python tools/audit_e2e.py topn split # only the ones named
+    python tools/audit_e2e.py --rounds 3 # several rounds each, to see the variance
 """
 from __future__ import annotations
 
@@ -36,7 +39,7 @@ N_RANDOM = 200
 
 
 def judge(task, code: str, sb: Sandbox, seed: int) -> dict:
-    """拿参考实现当标准答案，对编译出来的代码跑随机输入。"""
+    """Run random inputs through the compiled code, with the reference as answer key."""
     rng = random.Random(seed)
     inputs = [task.sample(rng) for _ in range(N_RANDOM)]
     want = [task.reference(i) for i in inputs]
@@ -52,7 +55,7 @@ def judge(task, code: str, sb: Sandbox, seed: int) -> dict:
             agree += 1
         elif len(diffs) < 3:
             diffs.append({"input": inputs[i], "reference": w,
-                          "got": r.value if r.ok else f"崩了: {r.error}"})
+                          "got": r.value if r.ok else f"raised: {r.error}"})
     return {"agree": agree, "n": len(inputs), "dead": "", "diffs": diffs}
 
 
@@ -66,13 +69,16 @@ def one(task, sb, seed) -> dict:
            "compiled": r.ok, "attempts": len(r.synth.attempts) if r.synth else 0,
            "generated": len(r.proposal.examples) if r.proposal else 0,
            "assumed": len(r.proposal.assumed) if r.proposal else 0,
-           # 补用例那步静默失败过一次（flatten 补出 0 条），不记下来就查不到原因
+           # test generation failed silently once (flatten produced 0 cases); without
+           # recording this there is no way to find out why
            "propose_error": r.proposal.error if r.proposal else "",
            "propose_dropped": [d["why"] for d in r.proposal.dropped] if r.proposal else [],
-           # 每次尝试卡在哪道关卡 —— 这是"修复循环到底有没有用"的唯一证据
-           "gates": [a.gate or "通过" for a in r.synth.attempts] if r.synth else [],
+           # which gate each attempt got stuck on -- the only evidence there is for
+           # whether the repair loop does anything
+           "gates": [a.gate or "passed" for a in r.synth.attempts] if r.synth else [],
            "summaries": [a.summary[:90] for a in r.synth.attempts] if r.synth else [],
-           # 挂掉那几次的代码也留着 —— "修复循环救回了什么"只能从这里看
+           # keep the code from the failed attempts too -- "what did the repair
+           # loop actually rescue" can only be answered from here
            "failed_code": [a.code for a in r.synth.attempts if a.gate] if r.synth else [],
            "secs": round(time.time() - t0), "reason": r.reason[:400]}
     if r.ok and r.synth:
@@ -95,33 +101,34 @@ def main(argv):
         for k in range(rounds):
             row = one(t, sb, k)
             rows.append(row)
-            tag = (f"编译失败" if not row["compiled"]
-                   else f"{row['agree']}/{row['n']} 和参考实现一致"
-                        + (f"　进程死了: {row['dead']}" if row.get("dead") else ""))
-            print(f"{t.key:10} 轮{k}  补{row['generated']}条"
-                  f"（{row['assumed']}条带假设）　尝试{row['attempts']}次"
-                  f" [{' → '.join(row['gates'])}]　{row['secs']}s　{tag}", flush=True)
+            tag = ("compile failed" if not row["compiled"]
+                   else f"{row['agree']}/{row['n']} agree with the reference"
+                        + (f"   process died: {row['dead']}" if row.get("dead") else ""))
+            print(f"{t.key:10} round {k}  {row['generated']} case(s)"
+                  f" ({row['assumed']} assumed)   {row['attempts']} attempt(s)"
+                  f" [{' -> '.join(row['gates'])}]   {row['secs']}s   {tag}", flush=True)
             for g, sm in zip(row["gates"], row["summaries"]):
-                if g != "通过":
-                    print(f"       卡在 {g}: {sm}")
+                if g != "passed":
+                    print(f"       stuck on {g}: {sm}")
             if row["propose_error"]:
-                print(f"       补用例出错: {row['propose_error']}")
+                print(f"       test generation failed: {row['propose_error']}")
             for w in row["propose_dropped"][:4]:
-                print(f"       丢弃: {w[:100]}")
+                print(f"       dropped: {w[:100]}")
             for d in row.get("diffs", []):
-                print(f"     输入 {json.dumps(d['input'], ensure_ascii=False)[:110]}")
-                print(f"     参考 {json.dumps(d['reference'], ensure_ascii=False)[:110]}")
-                print(f"     实际 {json.dumps(d['got'], ensure_ascii=False, default=str)[:110]}")
+                print(f"     input     {json.dumps(d['input'], ensure_ascii=False)[:110]}")
+                print(f"     reference {json.dumps(d['reference'], ensure_ascii=False)[:110]}")
+                print(f"     got       {json.dumps(d['got'], ensure_ascii=False, default=str)[:110]}")
             if not row["compiled"]:
                 print("     " + row["reason"].replace("\n", "\n     ")[:600])
 
     done = [r for r in rows if r["compiled"]]
     perfect = [r for r in done if r.get("agree") == r.get("n")]
-    print(f"\n编译成功 {len(done)}/{len(rows)}　"
-          f"其中和参考实现 200/200 一致的：{len(perfect)}/{len(done)}")
+    print(f"\ncompiled {len(done)}/{len(rows)}   "
+          f"of those, {len(perfect)}/{len(done)} agree with the reference on all "
+          f"{N_RANDOM} random inputs")
     with open("tools/audit_e2e_result.json", "w") as fh:
         json.dump(rows, fh, ensure_ascii=False, indent=2, default=str)
-    print("明细写入 tools/audit_e2e_result.json")
+    print("details written to tools/audit_e2e_result.json")
 
 
 if __name__ == "__main__":

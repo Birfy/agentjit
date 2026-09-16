@@ -1,12 +1,14 @@
-"""三级查找的测试。
+"""Tests for the three-level lookup.
 
-两条判据，一条比一条要紧：
+Two criteria, the second harder than the first:
 
-1. 同一需求换三种说法都命中同一个函数
-2. 一个语义相近但行为不同的需求（"求和" vs "求平均"）**不会**误命中
+1. three different wordings of one requirement all land on the same function
+2. a requirement that reads almost the same but behaves differently ("sum" vs
+   "average") **does not** hit by mistake
 
-第 2 条才是难的：这两句话字面上几乎一样，词法检索必然把它排在最前面。挡住它的
-不是检索，是复验。
+The second is the hard one: the two sentences are nearly identical as text, so lexical
+retrieval is bound to rank the wrong one first. What stops it is not retrieval — it is
+re-verification.
 """
 import pytest
 
@@ -17,18 +19,24 @@ from agentjit.lookup import find, schema_compatible, similarity
 from agentjit.synth import spec_for
 from agentjit.types import GateResult
 
-SUM_REQ = ("把 CSV 行按 type 字段分组，对 amount 求和，返回 {type: 总额}。"
-           "金额可能带货币符号和千分位逗号，要清洗。")
+SUM_REQ = ("Group CSV rows by the type field and sum the amount, returning "
+           "{type: total}. The amount may carry a currency symbol and thousands "
+           "separators, so clean it.")
 
-# 同一件事的三种说法。都不是 SUM_REQ 的改写，是重写。
+# Three ways of saying the same thing. None is a light edit of SUM_REQ; each is a
+# rewrite.
 SAME_THING = [
-    "按 type 把行分组，把 amount 加起来，输出每个 type 的总额。amount 里的货币符号和逗号要去掉。",
-    "对每一行，用 type 做分组键，amount 清洗成数字后累加，结果是 {type: 总和}。",
-    "给我一个按 type 汇总 amount 的函数，amount 是带 $ 和千分位的字符串。",
+    "Bucket the rows on type, add the amounts up, and output one total per type. "
+    "Strip the currency symbol and the commas out of each amount first.",
+    "For every row, use type as the grouping key and accumulate amount once it has "
+    "been cleaned into a number; the result is {type: sum}.",
+    "I need a function that totals amount per type, where amount arrives as a string "
+    "with a dollar sign and thousands separators.",
 ]
 
-# 字面上和 SUM_REQ 几乎一样，行为完全不同
-AVG_REQ = "把 CSV 行按 type 字段分组，对 amount 求平均，返回 {type: 均值}。"
+# Nearly identical to SUM_REQ as text, completely different in behaviour
+AVG_REQ = ("Group CSV rows by the type field and average the amount, returning "
+           "{type: mean}.")
 
 EXAMPLES = [
     Example({"rows": [{"type": "refund", "amount": "$1,200.50"},
@@ -61,7 +69,8 @@ SUM_CODE = '''def solve(params, ctx):
     return totals
 '''
 
-RANK_REQ = "把 {name, score} 记录按 score 从高到低排名次，同分并列。"
+RANK_REQ = ("Rank {name, score} records from highest score to lowest, "
+            "ties sharing a rank.")
 RANK_CODE = '''def solve(params, ctx):
     rows = sorted(params["records"], key=lambda r: -r["score"])
     return [{"name": r["name"], "rank": i + 1} for i, r in enumerate(rows)]
@@ -80,29 +89,32 @@ def sb():
 
 @pytest.fixture
 def reg(tmp_path, sb):
-    """一个已经装了"求和"函数的 registry。"""
+    """A registry that already holds the "sum" function."""
     r = Registry(tmp_path / "registry")
-    report = Report(level=Level.VERIFIED, gates=[GateResult("static", True, "通过")])
+    report = Report(level=Level.VERIFIED, gates=[GateResult("static", True, "passed")])
     r.put(SUM_REQ, spec_for(SUM_REQ, EXAMPLES), SUM_CODE, report, EXAMPLES)
     return r
 
 
 def fenced(code):
-    return f"给你。\n\n```python\n{code}\n```\n"
+    return f"Here you go.\n\n```python\n{code}\n```\n"
 
 
-# --- 相似度 ----------------------------------------------------------------
+# --- similarity ----------------------------------------------------------------
 def test_lexical_similarity_cannot_tell_sum_from_average():
-    """这条不是在测功能，是在钉住一个前提。
+    """This is not testing a feature; it is pinning down a premise.
 
-    "求平均"和"求和"的字面重合度，比任何一句真正的改写都高。所以**词法检索
-    必然把错的那个排在最前面** —— 复验不是锦上添花，它是唯一挡得住这件事的东西。
-    design.md §6.1 说向量也一样近，换成向量并不能解决它。
+    "average" overlaps "sum" as text more than any honest rewrite does. So **lexical
+    retrieval is bound to rank the wrong one first** — re-verification is not a nice
+    extra, it is the only thing that stops this. design.md §6.1 notes that embeddings
+    put them just as close together, so switching to vectors does not fix it.
     """
     rewrites = max(similarity(SUM_REQ, s) for s in SAME_THING)
     assert similarity(SUM_REQ, AVG_REQ) > rewrites
-    # 完全不相干的东西倒是能靠词法挡掉，所以阈值仍然有用
-    assert similarity(SUM_REQ, RANK_REQ) < 0.1
+    # It does separate an unrelated requirement from a rewrite, which is what the
+    # threshold is for — ranking and cost, not correctness.
+    assert similarity(SUM_REQ, RANK_REQ) < min(
+        similarity(SUM_REQ, s) for s in SAME_THING)
 
 
 def test_similarity_is_symmetric_and_bounded():
@@ -111,10 +123,11 @@ def test_similarity_is_symmetric_and_bounded():
     assert similarity("", "") == 1.0 and similarity("abc", "") == 0.0
 
 
-# --- schema 兼容 -----------------------------------------------------------
+# --- schema compatibility -----------------------------------------------------------
 def test_schema_filter_uses_the_same_ruler_as_the_runtime_guard(reg):
-    """查找说兼容、调用时被 guard 拦下，是最难查的一类自相矛盾。
-    所以两边都拿本次的例子去验候选的 schema。"""
+    """Lookup saying "compatible" and the guard then rejecting the call is the
+    nastiest kind of self-contradiction to debug. So both sides validate this run's
+    examples against the candidate's schema."""
     fn = reg.all()[0]
     assert schema_compatible(fn.spec, EXAMPLES) == ""
     why = schema_compatible(fn.spec, RANK_EXAMPLES)
@@ -127,7 +140,8 @@ def test_exact_requirement_hits_l1(reg, sb):
     assert lk.level == "L1" and lk.hit
 
 
-# 调用方改主意了：手续费按绝对值记，不带负号。需求原文一个字没变。
+# The caller changed their mind: record a fee as an absolute value, no minus sign.
+# Not one word of the requirement text changed.
 CORRECTED = EXAMPLES[:-1] + [
     Example({"rows": [{"type": "fee", "amount": "-$25.50"}]}, {"fee": 25.5}, boundary=True)]
 ABS_CODE = SUM_CODE.replace("            value = float(cleaned)",
@@ -135,13 +149,16 @@ ABS_CODE = SUM_CODE.replace("            value = float(cleaned)",
 
 
 def test_l1_still_reverifies_so_a_changed_expectation_is_not_served_stale(reg, sb):
-    """同一段需求文本，这次的例子和上次不一样（上次的期望写错了，或者需求被
-    重新理解了）。直接用旧版本，就是拿一个已知不满足本次判据的实现去交差。"""
+    """The same requirement text, but this run's examples differ from last time's
+    (the old expectation was wrong, or the requirement has been re-understood). Serving
+    the stored version means shipping an implementation already known not to satisfy
+    the criteria being asked for."""
     lk = find(reg, SUM_REQ, spec_for(SUM_REQ, EXAMPLES), CORRECTED, sandbox=sb)
 
     assert not lk.hit and lk.level == "miss"
-    assert lk.stale is not None, "要认出这是'同一个需求的旧版本过时了'，而不是没见过"
-    assert "对不上" in lk.candidates[0].why
+    assert lk.stale is not None, ("this has to read as 'the stored version of this "
+                                 "requirement went stale', not as 'never seen'")
+    assert "disagrees" in lk.candidates[0].why
 
 
 # --- L2 --------------------------------------------------------------------
@@ -153,41 +170,50 @@ def test_three_phrasings_all_land_on_the_same_function(reg, sb, phrasing):
 
 
 def test_a_near_identical_requirement_with_different_behaviour_misses(reg, sb):
-    """完成判据的第 2 条。检索会把它排第一，复验把它打掉。"""
+    """Criterion 2. Retrieval ranks it first; re-verification knocks it out."""
     lk = find(reg, AVG_REQ, spec_for(AVG_REQ, AVG_EXAMPLES), AVG_EXAMPLES, sandbox=sb)
 
     assert not lk.hit, lk.render()
     assert lk.candidates and lk.candidates[0].verdict == "reverify"
-    assert "对不上" in lk.candidates[0].why
+    assert "disagrees" in lk.candidates[0].why
 
 
-def test_unrelated_requirements_do_not_even_become_candidates(reg, sb):
+def test_an_unrelated_requirement_never_costs_a_sandbox_run(reg, sb):
+    """The lexical floor is script-dependent: in Chinese an unrelated requirement
+    scores ~0.03 and never becomes a candidate, while in English the bigram floor alone
+    puts it around 0.25 — above MIN_SIMILARITY. So the threshold cannot be what keeps
+    the cost down. The schema check is: it rejects on the examples, before the sandbox.
+    """
     lk = find(reg, RANK_REQ, spec_for(RANK_REQ, RANK_EXAMPLES), RANK_EXAMPLES, sandbox=sb)
-    assert not lk.hit and lk.candidates == [], "词法阈值该把它挡在复验之外，省一次沙箱"
+    assert not lk.hit
+    assert all(c.verdict == "schema" for c in lk.candidates), lk.render()
 
 
 
 def test_reverify_needs_examples_to_have_anything_to_say(reg, sb):
-    """不给例子就没有判据，没有判据就谈不上复验 —— 这时候 L2 只能 miss。"""
+    """No examples means no criteria, and no criteria means there is nothing to
+    re-verify against — so L2 can only miss."""
     lk = find(reg, SAME_THING[0], spec_for(SAME_THING[0], EXAMPLES), [], sandbox=sb)
     assert not lk.hit
 
 
-# --- 串起来 ----------------------------------------------------------------
-# 下面几条传 gen_tests=0：它们验的是缓存路径，不是补用例。不关掉的话每个
-# ScriptedClient 都得多备一条回复，测试意图就被无关的脚本淹掉了。
+# --- end to end ----------------------------------------------------------------
+# The tests below pass gen_tests=0: what they check is the cache path, not test
+# generation. Leaving it on would mean every ScriptedClient needs an extra canned reply,
+# and the point of each test drowns in unrelated script.
 def test_second_compile_costs_no_tokens(reg, sb):
     client = ScriptedClient([fenced(SUM_CODE)])
     r = compile_function(SAME_THING[0], EXAMPLES, client=client, registry=reg, sandbox=sb)
 
     assert r.ok and r.cache == "hit"
-    assert client.calls == [], "命中了还去问模型，就白查了"
+    assert client.calls == [], "asking the model after a hit makes the lookup pointless"
     assert r.tokens == (0, 0)
 
 
 def test_a_cache_hit_thickens_the_test_set(reg, sb):
-    """命中顺手把函数变厚：本次的例子刚通过复验，就是和当前实现一致的真判据。
-    这是测试集单调增长最便宜的一条来源。"""
+    """A hit thickens the function on the way past: this run's examples just passed
+    re-verification, so they are real criteria the current implementation agrees with.
+    It is the cheapest source of monotonic growth the test set has."""
     fn = reg.all()[0]
     before = len(fn.tests.examples)
     fresh = Example({"rows": [{"type": "tip", "amount": "$7"}]}, {"tip": 7.0})
@@ -221,7 +247,8 @@ def test_ephemeral_runs_but_never_reaches_disk(reg, sb):
 
 
 def test_stale_l1_produces_a_new_version_of_the_same_function(reg, sb):
-    """需求原文没变、例子变了 —— 这是同一个函数的新版本，不是新函数。"""
+    """Same requirement text, different examples — that is a new version of the same
+    function, not a new function."""
     r = compile_function(SUM_REQ, CORRECTED, client=ScriptedClient([fenced(ABS_CODE)]),
                          registry=reg, sandbox=sb, gen_tests=0)
 
@@ -232,6 +259,7 @@ def test_stale_l1_produces_a_new_version_of_the_same_function(reg, sb):
 
 # --- search ----------------------------------------------------------------
 def test_search_ranks_without_verifying(reg):
-    hits = search_functions("按 type 分组求和", registry=reg)
+    hits = search_functions("group rows by type and total the amount", registry=reg)
     assert hits and hits[0].fn.handle == reg.all()[0].handle
-    assert hits[0].verdict == "pending", "search 不复验 —— 它的调用方还没写例子"
+    assert hits[0].verdict == "pending", ("search does not re-verify — whoever calls it\n"
+                                      "         has not written the examples yet")

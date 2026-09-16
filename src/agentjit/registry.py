@@ -1,21 +1,25 @@
-"""落盘：把合成出来的函数存起来，之后按名字取回。
+"""Storage: keep the synthesised functions and fetch them back by name.
 
-布局：
+Layout:
 
     $AGENTJIT_HOME/registry/<spec_hash>/
-        spec.json     名字 + 需求原文 + 推断出的 schema + 入口
-        tests.json    调用方给的用例 —— 正确性就靠它，所以它是这里的主角
+        spec.json     name, the requirement text, the inferred schemas, the entry point
+        tests.json    the test cases — correctness rests on these, so they are the
+                      main asset here
         v1/
-            code.py       实现
-            report.json   当时的验证报告
+            code.py       the implementation
+            report.json   the verification report from the time it was stored
 
-**用例是资产，代码是可再生的**（correctness.md §10）。所以 `tests.json` 属于 spec
-不属于版本：同一个需求的所有版本共用同一份用例，换个更好的模型重新生成时拿它验收。
-放在版本里意味着每次重生成都复制一份，之后各自增长，再也合不回去。
+**The cases are the asset; the code is regenerable** (correctness.md §10). So
+`tests.json` belongs to the spec, not to a version: every version of a requirement
+shares one growing set of cases, and that set is what a regeneration with a better
+model is accepted against. Putting it inside the version would mean copying it on every
+regeneration, after which the two copies drift apart and can never be merged back.
 
-一个 `spec_hash` 下可以有多个版本，**取最新的那个**。早先这里按
-(验证等级, 复验通过次数, 线上失败率) 三级排序，还有连续失败就隔离的逻辑 ——
-真实使用中从来只存在过一个版本，那套排序一次也没派上用场，删了。
+A `spec_hash` can hold several versions; **the newest one wins**. This used to rank
+them by (level, times re-verified, production failure rate) and quarantine a version
+after repeated failures — in real use there was only ever one version, so the ranking
+never did anything and was removed.
 """
 from __future__ import annotations
 
@@ -33,8 +37,8 @@ from .types import Example, Level, Report, Spec
 
 HANDLE_RE = re.compile(r"^(?:fn_)?([0-9a-f]{6,64})$")
 
-# 只有拿得出用例的才进持久缓存。EPHEMERAL 的定义就是"没有用例可判"，
-# 存下来等于把一个没人验过的实现摆上货架。
+# Only something with test cases reaches the persistent cache. EPHEMERAL means "nothing
+# to judge it by"; storing that is putting an unverified implementation on the shelf.
 CACHEABLE = (Level.VERIFIED,)
 
 
@@ -48,12 +52,14 @@ def _canon(value: Any) -> str:
 
 
 def spec_hash(requirement: str, spec: Spec) -> str:
-    """缓存的 key：需求文本压掉空白 + 推断出的 schema + 入口名，精确 hash。
+    """The cache key: whitespace-collapsed requirement text, the inferred schemas, and
+    the entry name — an exact hash.
 
-    换一种说法描述同一件事不会命中这里 —— 那条路在 `lookup.py` 的 L2。
+    A different wording of the same thing will not match here; that path is L2 in
+    `lookup.py`.
 
-    schema 参与 hash 不是多余的：同样一句"求和"，输入是 `{rows: [...]}` 还是
-    `{values: [...]}`，要的是两个不同的函数。
+    Including the schemas is not redundant: the same phrase "sum them" means two
+    different functions when the input is `{rows: [...]}` versus `{values: [...]}`.
     """
     norm = " ".join(requirement.split())
     blob = _canon([norm, spec.param_schema, spec.return_schema, spec.entry])
@@ -61,10 +67,11 @@ def spec_hash(requirement: str, spec: Spec) -> str:
 
 
 def split_ref(ref: str) -> tuple[str, str | None]:
-    """把 `<名字或 handle>[@版本]` 拆开。
+    """Split `<name-or-handle>[@version]`.
 
-    名字和 handle 走同一条路 —— 调用方不该为了指定版本先判断自己拿的是哪种。
-    `rank@v2` / `fn_7a3c9e@v2` / `rank` / `fn_7a3c9e` 都行。
+    Names and handles take the same path — a caller should not have to work out which
+    kind it is holding just to pin a version. `rank@v2`, `fn_7a3c9e@v2`, `rank` and
+    `fn_7a3c9e` all work.
     """
     base, _, ver = ref.strip().partition("@")
     return base.strip(), (ver.strip() or None)
@@ -72,12 +79,13 @@ def split_ref(ref: str) -> tuple[str, str | None]:
 
 @dataclass
 class TestSet:
-    """调用方给的用例。只增不减 —— 删一条就是把对需求的一点理解丢掉。"""
+    """The test cases. They only accumulate — deleting one throws away a piece of
+    hard-won understanding of the requirement."""
 
     examples: list[Example] = field(default_factory=list)
 
     def add(self, ex: Example) -> bool:
-        """同一个输入只留一条。返回 True 表示这是条新的。"""
+        """One entry per input. True means it was new."""
         key = _canon(ex.input)
         if any(_canon(e.input) == key for e in self.examples):
             return False
@@ -124,8 +132,9 @@ class Function:
     tests: TestSet
     versions: list[Version] = field(default_factory=list)
     created_at: str = ""
-    # 人起的名字。`fn_a84dbc11d69f` 机器好用，人记不住 —— 而这东西的用法就是
-    # "上次那个排名次的函数叫什么来着"。没起名字就只能靠 handle。
+    # A human-chosen name. `fn_a84dbc11d69f` is fine for machines and impossible for
+    # people — and the way this gets used is "what was that ranking function called?".
+    # Without a name you are stuck with the handle.
     name: str = ""
 
     @property
@@ -134,14 +143,14 @@ class Function:
 
     @property
     def ref(self) -> str:
-        """指代它的最短方式。有名字用名字。"""
+        """The shortest way to refer to it: the name when there is one."""
         return self.name or self.handle
 
     def version(self, name: str) -> Version | None:
         return next((v for v in self.versions if v.name == name), None)
 
     def best(self) -> Version | None:
-        """最新的那个。新版本多半是因为老的不够好才生成的。"""
+        """The newest one. A new version usually exists because the old one fell short."""
         return max(self.versions, key=lambda v: v.n, default=None)
 
     def spec_meta(self) -> dict[str, Any]:
@@ -155,7 +164,7 @@ def _now() -> str:
 
 
 def _write(path: Path, text: str) -> None:
-    """原子落盘。半截的 tests.json 比没有 tests.json 更难查。"""
+    """Atomic write. A half-written tests.json is harder to debug than a missing one."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
     try:
@@ -183,15 +192,15 @@ class Registry:
     def __init__(self, root: Path | None = None):
         self.root = Path(root) if root else home() / "registry"
 
-    # --- 读 ----------------------------------------------------------------
+    # --- read ---------------------------------------------------------------
     def dir_of(self, spec_hash: str) -> Path:
         return self.root / spec_hash
 
     def get(self, ref: str) -> Function | None:
-        """按**名字**或 handle 取一个函数。
+        """Fetch a function by **name** or handle.
 
-        名字优先 —— 人给的名字不会长得像 `fn_a84dbc11`，撞不上；真撞上了说明
-        用户就是想按那个名字找。
+        Names take precedence: a human-chosen name will not look like `fn_a84dbc11`, so
+        they cannot collide by accident — and if one ever does, the user meant the name.
         """
         base, _ = split_ref(ref)
         if (fn := self.by_name(base)) is not None:
@@ -202,7 +211,7 @@ class Registry:
         h = m.group(1)
         d = self.dir_of(h)
         if not (d / "spec.json").exists():
-            # 允许用前缀找：handle 在终端里被截断是常事
+            # Allow a prefix: handles get truncated in terminals all the time
             matches = [p for p in self._dirs() if p.name.startswith(h)]
             if len(matches) != 1:
                 return None
@@ -252,7 +261,7 @@ class Registry:
                         versions=versions, created_at=meta.get("created_at", ""),
                         name=meta.get("name", ""))
 
-    # --- 写 ----------------------------------------------------------------
+    # --- write --------------------------------------------------------------
     def put(
         self,
         requirement: str,
@@ -267,18 +276,19 @@ class Registry:
         output_tokens: int = 0,
         name: str = "",
     ) -> Function:
-        """把一次成功的合成落盘。已有同 spec 时追加一个新版本。"""
+        """Store a successful synthesis, appending a version if the spec already exists."""
         if report.level not in CACHEABLE:
             raise NotCacheable(
-                f"{report.level.value} 不进持久缓存 —— 没有用例验过的实现存下来，"
-                "就是把一个没人验过的东西摆上货架")
+                f"{report.level.value} is not cached — storing an implementation no test "
+                "case ever checked is putting an unverified thing on the shelf")
 
         h = spec_hash(requirement, spec)
         if name and (other := self.by_name(name)) is not None and other.spec_hash != h:
-            # 名字是给人用的索引，一个名字指向两个函数就等于没索引。
-            # 宁可在这里报错，也不要让 get("rank") 的结果取决于目录遍历顺序。
-            raise NameTaken(f"名字 {name!r} 已经被 {other.handle} 占了"
-                            f"（{other.requirement[:40]}）—— 换一个，或者不起名字")
+            # The name is a human index; a name pointing at two functions is no index at
+            # all. Better to fail here than to let get("rank") depend on directory order.
+            raise NameTaken(
+                f"the name {name!r} is already taken by {other.handle} "
+                f"({other.requirement[:40]}) — pick another, or omit the name")
 
         fn = self._load(self.dir_of(h)) if (self.dir_of(h) / "spec.json").exists() else None
         if fn is None:
@@ -286,7 +296,7 @@ class Registry:
                           tests=TestSet(), created_at=_now(), name=name)
             self.save_spec(fn)
         elif name and fn.name != name:
-            fn.name = name                       # 补个名字，或者改名
+            fn.name = name                       # add a name, or rename
             self.save_spec(fn)
 
         for ex in examples:
