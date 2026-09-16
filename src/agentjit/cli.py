@@ -70,38 +70,88 @@ def cmd_selftest(args) -> int:
 
 
 def cmd_compile(args) -> int:
-    """从需求 + 例子合成一个函数，全程走完整验证。要花 token。"""
-    from .llm import AnthropicClient
-    from .registry import NotCacheable, Registry
-    from .synth import compile_function
+    """先查缓存，没有才合成。只有合成那条路花 token。"""
+    from .jit import compile_function
+    from .registry import Registry
 
     meta = _json.loads(Path(args.requirement).read_text())
     examples = [Example.from_dict(e) for e in meta["examples"]]
-    client = AnthropicClient(model=args.model)
 
     print(f"需求: {meta['requirement'][:90]}")
-    print(f"例子: {len(examples)} 个（边界 {sum(e.boundary for e in examples)} 个）　模型: {args.model}\n")
+    print(f"例子: {len(examples)} 个（边界 {sum(e.boundary for e in examples)} 个）　"
+          f"模型: {args.model}　cache: {args.cache}\n")
 
-    r = compile_function(meta["requirement"], examples, client=client,
-                         max_attempts=args.attempts)
+    try:
+        r = compile_function(meta["requirement"], examples, client=_LazyClient(args.model),
+                             registry=Registry(args.home), cache=args.cache,
+                             model=args.model, max_attempts=args.attempts)
+    except NoCredentials as e:
+        print(e, file=sys.stderr)
+        return 2
     print(r.render())
     if not r.ok:
         return 1
-
-    if args.out:
-        Path(args.out).write_text(r.code + "\n")
+    code = r.synth.code if r.synth else _code_of(args.home, r.handle)
+    if args.out and code:
+        Path(args.out).write_text(code + "\n")
         print(f"\n已写入 {args.out}")
-    if args.save:
-        try:
-            fn = Registry(args.home).put(
-                meta["requirement"], r.spec, r.code, r.report, examples,
-                model=args.model, attempts=len(r.attempts),
-                input_tokens=r.input_tokens, output_tokens=r.output_tokens)
-            print(f"\nhandle: {fn.handle}　（{fn.versions[-1].name}）")
-        except NotCacheable as e:
-            print(f"\n未入库：{e}")
-    if not args.out:
-        print("\n" + r.code)
+    elif code:
+        print("\n" + code)
+    return 0
+
+
+class NoCredentials(RuntimeError):
+    pass
+
+
+class _LazyClient:
+    """真要合成的时候才构造客户端。
+
+    这样没凭据的机器上 `agentjit compile` 仍然能查缓存 —— 命中就根本不需要
+    凭据。构造 `AnthropicClient` 会 import anthropic 并读凭据，放在最前面做，
+    等于让"有没有现成的"这个问题也依赖网络。
+    """
+
+    def __init__(self, model: str):
+        self.model, self._real = model, None
+
+    def complete(self, **kw):
+        if self._real is None:
+            try:
+                from .llm import AnthropicClient
+                self._real = AnthropicClient(model=self.model)
+            except Exception as e:
+                # 没装包、没登录、凭据过期都走这里。这是最常撞上的一条路，
+                # 不该甩一串 traceback 出去 —— 要说清楚下一步做什么。
+                raise NoCredentials(
+                    f"缓存没命中，合成需要 Anthropic 客户端，但起不来：{e}\n"
+                    "    pip install anthropic\n"
+                    "    ant auth login          # 别让浏览器授权那步超时\n"
+                    "只想用现成的函数就跑 agentjit search / agentjit list。") from e
+        return self._real.complete(**kw)
+
+
+def _code_of(home, handle: str) -> str:
+    from .registry import Registry
+    fn = Registry(home).get(handle)
+    v = fn.best() if fn else None
+    return v.code if v else ""
+
+
+def cmd_search(args) -> int:
+    """写需求之前先看看有没有现成的。只排序不复验 —— 复验要例子。"""
+    from .jit import search_functions
+    from .registry import Registry
+
+    hits = search_functions(args.query, registry=Registry(args.home), limit=args.limit)
+    if not hits:
+        print("registry 是空的")
+        return 0
+    for c in hits:
+        print(f"{c.similarity:.2f}  {c.fn.handle}@{c.version.name}  "
+              f"{c.version.level.value:<10}{c.fn.requirement[:56]}")
+    print("\n相似度只用来缩小候选集。「求和」和「求平均」在字面上非常近 —— "
+          "真正的判定要拿你的例子跑一遍复验（compile 会做）。")
     return 0
 
 
@@ -305,14 +355,19 @@ def main(argv=None) -> int:
     s.add_argument("--corpus", default=None)
     s.set_defaults(fn=cmd_selftest)
 
-    c = sub.add_parser("compile", help="从需求 + 例子合成一个函数（会调用 LLM）")
+    c = sub.add_parser("compile", help="先查缓存，没有才合成（合成会调用 LLM）")
     c.add_argument("requirement", help="JSON 文件：{requirement, examples[]}")
     c.add_argument("--model", default=None)
     c.add_argument("--attempts", type=int, default=3)
     c.add_argument("-o", "--out", default=None, help="成功时把代码写到这里")
-    c.add_argument("--no-save", dest="save", action="store_false",
-                   help="不入库（默认 VERIFIED 就入库）")
-    c.set_defaults(fn=cmd_compile, save=True)
+    c.add_argument("--cache", choices=["auto", "force_new", "ephemeral"], default="auto",
+                   help="auto=先查后合成；force_new=强制合成新版本；ephemeral=合成一次不落盘")
+    c.set_defaults(fn=cmd_compile)
+
+    se = sub.add_parser("search", help="写需求前先看看有没有现成的")
+    se.add_argument("query")
+    se.add_argument("-n", "--limit", type=int, default=10)
+    se.set_defaults(fn=cmd_search)
 
     a = sub.add_parser("adopt", help="把一份人写的实现验一遍再入库，不花 token")
     a.add_argument("case", help="语料目录，含 case.json")

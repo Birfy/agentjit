@@ -92,6 +92,20 @@ def extract_code(text: str, entry: str = "solve") -> str:
     return ""
 
 
+def spec_for(requirement: str, examples: list[Example], entry: str = "solve") -> Spec:
+    """从需求和例子推出规格。
+
+    schema 从**全部**例子推，包括保留集 —— 结构是契约的一部分，不是答案。
+    保留集要藏起来的是"这个输入对应哪个输出"，不是"输入长什么样"。
+
+    单独拆出来是因为查找要用：缓存的 key 里有 schema，所以得先有规格才能去查，
+    而查中了就根本不用合成。
+    """
+    pschema, rschema = spec_schemas(examples)
+    return Spec(intent=requirement.strip().splitlines()[0][:160],
+                param_schema=pschema, return_schema=rschema, entry=entry)
+
+
 def compile_function(
     requirement: str,
     examples: list[Example],
@@ -105,12 +119,7 @@ def compile_function(
 ) -> SynthResult:
     th = thresholds or Thresholds()
     sb = sandbox or Sandbox()
-
-    # schema 从**全部**例子推，包括保留集 —— 结构是契约的一部分，不是答案。
-    # 保留集要藏起来的是"这个输入对应哪个输出"，不是"输入长什么样"。
-    pschema, rschema = spec_schemas(examples)
-    spec = Spec(intent=requirement.strip().splitlines()[0][:160],
-                param_schema=pschema, return_schema=rschema, entry=entry)
+    spec = spec_for(requirement, examples, entry)
 
     attempts: list[Attempt] = []
     for rotation in range(max_rotations + 1):
