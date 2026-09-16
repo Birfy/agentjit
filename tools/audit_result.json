@@ -1,0 +1,1524 @@
+[
+  {
+    "key": "logs",
+    "shape": "文本解析",
+    "requirement": "把日志行解析成结构化记录。每行形如 `2024-01-05 12:03:44 ERROR [svc-auth] 这里是消息正文`：依次是日期、时间、级别、方括号里的服务名、以及剩下的全部作为消息正文。级别只可能是 DEBUG/INFO/WARN/ERROR。消息正文里可能还有方括号，以**第一个** `]` 作为服务名的结束。每行先去掉首尾空白；去掉之后为空的行直接跳过，不出现在输出里。返回 [{date, time, level, service, message}]，顺序和输入一致。",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] login failed",
+            "2024-01-05 12:04:00 INFO [svc-web] request processed"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:04:00",
+            "level": "INFO",
+            "service": "svc-web",
+            "message": "request processed"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:04:00",
+            "level": "INFO",
+            "service": "svc-web",
+            "message": "request processed"
+          }
+        ],
+        "note": "多条日志行，验证顺序和输入一致",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:00:00 DEBUG [svc-db] debug info",
+            "2024-01-05 12:01:00 INFO [svc-api] info message",
+            "2024-01-05 12:02:00 WARN [svc-cache] warning message",
+            "2024-01-05 12:03:00 ERROR [svc-auth] error message"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:00:00",
+            "level": "DEBUG",
+            "service": "svc-db",
+            "message": "debug info"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:01:00",
+            "level": "INFO",
+            "service": "svc-api",
+            "message": "info message"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:02:00",
+            "level": "WARN",
+            "service": "svc-cache",
+            "message": "warning message"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:03:00",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "error message"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:00:00",
+            "level": "DEBUG",
+            "service": "svc-db",
+            "message": "debug info"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:01:00",
+            "level": "INFO",
+            "service": "svc-api",
+            "message": "info message"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:02:00",
+            "level": "WARN",
+            "service": "svc-cache",
+            "message": "warning message"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:03:00",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "error message"
+          }
+        ],
+        "note": "验证四个日志级别都能正确识别",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] msg [contains] more brackets]"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "msg [contains] more brackets]"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "msg [contains] more brackets]"
+          }
+        ],
+        "note": "消息正文包含方括号，验证用第一个 ] 作为服务名结束",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "  2024-01-05 12:03:44 ERROR [svc-auth] login failed  "
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          }
+        ],
+        "note": "行首尾有空白，验证正确去掉首尾空白后能正常解析",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] login failed",
+            "",
+            "   ",
+            "2024-01-05 12:04:00 INFO [svc-web] request processed"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:04:00",
+            "level": "INFO",
+            "service": "svc-web",
+            "message": "request processed"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "login failed"
+          },
+          {
+            "date": "2024-01-05",
+            "time": "12:04:00",
+            "level": "INFO",
+            "service": "svc-web",
+            "message": "request processed"
+          }
+        ],
+        "note": "包含空行和纯空白行，验证这些行被正确跳过",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] "
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": ""
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": ""
+          }
+        ],
+        "note": "消息正文为空（去掉首尾空白后），验证返回空字符串",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] error in [module] processing [item]"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "error in [module] processing [item]"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "error in [module] processing [item]"
+          }
+        ],
+        "note": "消息正文包含嵌套方括号，验证后续所有内容都作为消息正文",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "lines": [
+            "2024-01-05 12:03:44 ERROR [svc-auth] connection timeout: 127.0.0.1:8080"
+          ]
+        },
+        "model": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "connection timeout: 127.0.0.1:8080"
+          }
+        ],
+        "reference": [
+          {
+            "date": "2024-01-05",
+            "time": "12:03:44",
+            "level": "ERROR",
+            "service": "svc-auth",
+            "message": "connection timeout: 127.0.0.1:8080"
+          }
+        ],
+        "note": "消息正文包含特殊字符（冒号、点、数字），验证正确保留",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      1050,
+      6935
+    ]
+  },
+  {
+    "key": "workdays",
+    "shape": "日期计算",
+    "requirement": "给定 start 和 end 两个日期（YYYY-MM-DD 字符串），数出这个区间里有多少个工作日。**包含 start 和 end 两个端点**。工作日指周一到周五，不考虑节假日。如果 start 比 end 晚，返回 0。返回 {days: 整数}。",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "start": "2024-01-01",
+          "end": "2024-01-01"
+        },
+        "model": {
+          "days": 1
+        },
+        "reference": {
+          "days": 1
+        },
+        "note": "单个工作日（周一），端点相等应该返回1",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-06",
+          "end": "2024-01-06"
+        },
+        "model": {
+          "days": 0
+        },
+        "reference": {
+          "days": 0
+        },
+        "note": "单个非工作日（周六），端点相等应该返回0",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-05",
+          "end": "2024-01-01"
+        },
+        "model": {
+          "days": 0
+        },
+        "reference": {
+          "days": 0
+        },
+        "note": "start比end晚，应该返回0",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-01",
+          "end": "2024-01-07"
+        },
+        "model": {
+          "days": 5
+        },
+        "reference": {
+          "days": 5
+        },
+        "note": "整周（周一至周日）包含5个工作日",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-01",
+          "end": "2024-01-12"
+        },
+        "model": {
+          "days": 10
+        },
+        "reference": {
+          "days": 10
+        },
+        "note": "两个完整工作周应该有10个工作日",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-04",
+          "end": "2024-01-08"
+        },
+        "model": {
+          "days": 3
+        },
+        "reference": {
+          "days": 3
+        },
+        "note": "跨周末：周四、周五、周一共3个工作日",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-13",
+          "end": "2024-01-14"
+        },
+        "model": {
+          "days": 0
+        },
+        "reference": {
+          "days": 0
+        },
+        "note": "纯周末（周六、周日），应该返回0",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "start": "2024-01-31",
+          "end": "2024-02-02"
+        },
+        "model": {
+          "days": 3
+        },
+        "reference": {
+          "days": 3
+        },
+        "note": "跨越月份边界：1月31日（周三）、2月1日（周四）、2月2日（周五）",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      928,
+      4658
+    ]
+  },
+  {
+    "key": "flatten",
+    "shape": "嵌套结构重组",
+    "requirement": "把嵌套的 dict 压平成单层，路径上的键用点号连接，比如 `{'a': {'b': 1}}` 变成 `{'a.b': 1}`。只有 dict 继续往下展开；数组当作普通值，原样保留不展开。**空 dict 作为值时直接丢弃**，不产生任何键。返回压平后的 dict。",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": {
+                "c": 1
+              }
+            }
+          }
+        },
+        "model": {
+          "a.b.c": 1
+        },
+        "reference": {
+          "a.b.c": 1
+        },
+        "note": "三层嵌套的逐级展开",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": [
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        "model": {
+          "a": [
+            1,
+            2,
+            3
+          ]
+        },
+        "reference": {
+          "a": [
+            1,
+            2,
+            3
+          ]
+        },
+        "note": "数组作为值时不展开，原样保留",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {},
+            "b": 1
+          }
+        },
+        "model": {
+          "b": 1
+        },
+        "reference": {
+          "b": 1
+        },
+        "note": "空 dict 作为值时被丢弃，不产生任何键",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {
+              "b": [
+                1,
+                2
+              ]
+            },
+            "c": 3
+          }
+        },
+        "model": {
+          "a.b": [
+            1,
+            2
+          ],
+          "c": 3
+        },
+        "reference": {
+          "a.b": [
+            1,
+            2
+          ],
+          "c": 3
+        },
+        "note": "嵌套 dict 和数组混合时，数组在展开路径的末端保留",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": [
+              {
+                "b": 1
+              }
+            ]
+          }
+        },
+        "model": {
+          "a": [
+            {
+              "b": 1
+            }
+          ]
+        },
+        "reference": {
+          "a": [
+            {
+              "b": 1
+            }
+          ]
+        },
+        "note": "数组内的 dict 不再展开，数组作为不可分割的值",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": null,
+            "b": {
+              "c": 1
+            }
+          }
+        },
+        "model": {
+          "a": null,
+          "b.c": 1
+        },
+        "reference": {
+          "a": null,
+          "b.c": 1
+        },
+        "note": "null 值被保留，不被丢弃",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": {},
+            "b": {},
+            "c": 1
+          }
+        },
+        "model": {
+          "c": 1
+        },
+        "reference": {
+          "c": 1
+        },
+        "note": "多个空 dict 作为值都被丢弃",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "obj": {
+            "a": 1,
+            "b": "text",
+            "c": true,
+            "d": {
+              "e": false
+            }
+          }
+        },
+        "model": {
+          "a": 1,
+          "b": "text",
+          "c": true,
+          "d.e": false
+        },
+        "reference": {
+          "a": 1,
+          "b": "text",
+          "c": true,
+          "d.e": false
+        },
+        "note": "单层和嵌套混合，支持数字、字符串、布尔等基本类型",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      927,
+      4373
+    ]
+  },
+  {
+    "key": "topn",
+    "shape": "分组取前 N",
+    "requirement": "把 {name, dept, salary} 记录按 dept 分组，每组内按 salary **从高到低**取前 2 名。薪水相同的按 name 字典序排。不足 2 人的组就有几个给几个。返回 [{dept, top}]，其中 top 是名字数组；外层按 dept 字典序升序。",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "sales",
+              "salary": 100
+            },
+            {
+              "name": "bob",
+              "dept": "it",
+              "salary": 90
+            },
+            {
+              "name": "charlie",
+              "dept": "hr",
+              "salary": 110
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "hr",
+            "top": [
+              "charlie"
+            ]
+          },
+          {
+            "dept": "it",
+            "top": [
+              "bob"
+            ]
+          },
+          {
+            "dept": "sales",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "hr",
+            "top": [
+              "charlie"
+            ]
+          },
+          {
+            "dept": "it",
+            "top": [
+              "bob"
+            ]
+          },
+          {
+            "dept": "sales",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "note": "多个部门各1人，验证外层按dept字典序升序",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "c",
+              "dept": "x",
+              "salary": 100
+            },
+            {
+              "name": "a",
+              "dept": "x",
+              "salary": 100
+            },
+            {
+              "name": "b",
+              "dept": "x",
+              "salary": 100
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "note": "三人薪水相同，按name字典序取前2个（a<b<c）",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "alice",
+              "dept": "x",
+              "salary": 100
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "alice"
+            ]
+          }
+        ],
+        "note": "单人部门，不足2人就有几个给几个",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "a",
+              "dept": "x",
+              "salary": 10
+            },
+            {
+              "name": "b",
+              "dept": "x",
+              "salary": 20
+            },
+            {
+              "name": "c",
+              "dept": "y",
+              "salary": 15
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "b",
+              "a"
+            ]
+          },
+          {
+            "dept": "y",
+            "top": [
+              "c"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "b",
+              "a"
+            ]
+          },
+          {
+            "dept": "y",
+            "top": [
+              "c"
+            ]
+          }
+        ],
+        "note": "多部门混合：x部门2人y部门1人，外层dept按字典序",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "a",
+              "dept": "x",
+              "salary": 30
+            },
+            {
+              "name": "b",
+              "dept": "x",
+              "salary": 20
+            },
+            {
+              "name": "c",
+              "dept": "x",
+              "salary": 20
+            },
+            {
+              "name": "d",
+              "dept": "x",
+              "salary": 10
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "note": "部门内多人，两个20薪水时按name字典序排（b<c），取a和b",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "z",
+              "dept": "m",
+              "salary": 50
+            },
+            {
+              "name": "y",
+              "dept": "a",
+              "salary": 60
+            },
+            {
+              "name": "x",
+              "dept": "b",
+              "salary": 55
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "a",
+            "top": [
+              "y"
+            ]
+          },
+          {
+            "dept": "b",
+            "top": [
+              "x"
+            ]
+          },
+          {
+            "dept": "m",
+            "top": [
+              "z"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "a",
+            "top": [
+              "y"
+            ]
+          },
+          {
+            "dept": "b",
+            "top": [
+              "x"
+            ]
+          },
+          {
+            "dept": "m",
+            "top": [
+              "z"
+            ]
+          }
+        ],
+        "note": "三部门字典序为a<b<m，name和dept顺序无关",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "a",
+              "dept": "p1",
+              "salary": 100
+            },
+            {
+              "name": "b",
+              "dept": "p10",
+              "salary": 100
+            },
+            {
+              "name": "c",
+              "dept": "p2",
+              "salary": 100
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "p1",
+            "top": [
+              "a"
+            ]
+          },
+          {
+            "dept": "p10",
+            "top": [
+              "b"
+            ]
+          },
+          {
+            "dept": "p2",
+            "top": [
+              "c"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "p1",
+            "top": [
+              "a"
+            ]
+          },
+          {
+            "dept": "p10",
+            "top": [
+              "b"
+            ]
+          },
+          {
+            "dept": "p2",
+            "top": [
+              "c"
+            ]
+          }
+        ],
+        "note": "dept名含数字，字典序为p1<p10<p2",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "name": "e",
+              "dept": "x",
+              "salary": 100
+            },
+            {
+              "name": "c",
+              "dept": "x",
+              "salary": 100
+            },
+            {
+              "name": "d",
+              "dept": "x",
+              "salary": 100
+            },
+            {
+              "name": "f",
+              "dept": "x",
+              "salary": 80
+            }
+          ]
+        },
+        "model": [
+          {
+            "dept": "x",
+            "top": [
+              "c",
+              "d"
+            ]
+          }
+        ],
+        "reference": [
+          {
+            "dept": "x",
+            "top": [
+              "c",
+              "d"
+            ]
+          }
+        ],
+        "note": "多个最高薪(100)的人中，按name字典序取前2个（c<d<e）",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      994,
+      8147
+    ]
+  },
+  {
+    "key": "uptime",
+    "shape": "带状态的聚合",
+    "requirement": "给一串事件 {ts, event}，ts 是整数秒，event 是 'start' 或 'stop'，按输入顺序处理（**不要重新排序**）。算出总运行时长（秒）。规则：start 之后遇到 stop，这一段计入总时长；已经在运行中时再遇到 start，**忽略**这个 start；不在运行中时遇到 stop，**忽略**这个 stop；最后一个 start 如果没有对应的 stop，这一段不计入。返回 {seconds: 整数}。",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 20,
+              "event": "start"
+            },
+            {
+              "ts": 30,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 20
+        },
+        "reference": {
+          "seconds": 20
+        },
+        "note": "多个独立的运行段分别计时后相加",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "已在运行中再遇到 start，第二个 start 被忽略",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 15,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "不在运行中时遇到 stop，第二个 stop 被忽略",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 20,
+              "event": "start"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 10
+        },
+        "reference": {
+          "seconds": 10
+        },
+        "note": "最后一个 start 没有对应的 stop，不计入总时长",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 0
+        },
+        "reference": {
+          "seconds": 0
+        },
+        "note": "不在运行中时的 stop 被忽略",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 5,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 15,
+              "event": "start"
+            },
+            {
+              "ts": 20,
+              "event": "stop"
+            },
+            {
+              "ts": 25,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 15
+        },
+        "reference": {
+          "seconds": 15
+        },
+        "note": "复杂交错：重复 start 被忽略，两段正常配对，末尾多余 stop 被忽略",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 10,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 0
+        },
+        "reference": {
+          "seconds": 0
+        },
+        "note": "start 和 stop 时间戳相同，时长为 0",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "ts": 0,
+              "event": "start"
+            },
+            {
+              "ts": 10,
+              "event": "stop"
+            },
+            {
+              "ts": 15,
+              "event": "stop"
+            },
+            {
+              "ts": 20,
+              "event": "stop"
+            },
+            {
+              "ts": 25,
+              "event": "start"
+            },
+            {
+              "ts": 30,
+              "event": "stop"
+            }
+          ]
+        },
+        "model": {
+          "seconds": 15
+        },
+        "reference": {
+          "seconds": 15
+        },
+        "note": "多个连续 stop 都被忽略，然后 start 再次开始计时",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      1001,
+      4590
+    ]
+  },
+  {
+    "key": "split",
+    "shape": "金额分摊（舍入）",
+    "requirement": "把 total（整数，单位是分）按 weights（正整数数组）的比例分摊。每一项先按 total * w / sum(weights) **向下取整**，然后把剩下的余数一分一分地发出去：**按权重从大到小**依次每人加 1 分，权重相同的按下标小的优先。发完为止。结果必须精确加总等于 total。返回整数数组，顺序和 weights 一致。",
+    "proposed": 8,
+    "dropped": 0,
+    "error": "",
+    "rows": [
+      {
+        "input": {
+          "total": 100,
+          "weights": [
+            1
+          ]
+        },
+        "model": [
+          100
+        ],
+        "reference": [
+          100
+        ],
+        "note": "单个权重，所有金额分配给唯一项",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 10,
+          "weights": [
+            1,
+            1,
+            1
+          ]
+        },
+        "model": [
+          4,
+          3,
+          3
+        ],
+        "reference": [
+          4,
+          3,
+          3
+        ],
+        "note": "权重完全相等且有余数时，按下标从小到大依次分配",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 12,
+          "weights": [
+            1,
+            1,
+            1
+          ]
+        },
+        "model": [
+          4,
+          4,
+          4
+        ],
+        "reference": [
+          4,
+          4,
+          4
+        ],
+        "note": "权重相等且能完全整除，无余数",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 11,
+          "weights": [
+            3,
+            2,
+            1
+          ]
+        },
+        "model": [
+          6,
+          4,
+          1
+        ],
+        "reference": [
+          6,
+          4,
+          1
+        ],
+        "note": "权重全部不同且有多个余数，按权重大小依次分配余数",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 10,
+          "weights": [
+            2,
+            2,
+            1
+          ]
+        },
+        "model": [
+          4,
+          4,
+          2
+        ],
+        "reference": [
+          4,
+          4,
+          2
+        ],
+        "note": "混合权重但基础分配已完全分配，无余数",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 11,
+          "weights": [
+            2,
+            2,
+            1
+          ]
+        },
+        "model": [
+          5,
+          4,
+          2
+        ],
+        "reference": [
+          5,
+          4,
+          2
+        ],
+        "note": "权重部分相等，有余数时按下标优先（相等权重中下标小优先）",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 13,
+          "weights": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "model": [
+          3,
+          3,
+          3,
+          2,
+          2
+        ],
+        "reference": [
+          3,
+          3,
+          3,
+          2,
+          2
+        ],
+        "note": "多个相等权重，余数多于1时按下标顺序分配多个",
+        "agree": true,
+        "ref_error": null
+      },
+      {
+        "input": {
+          "total": 5,
+          "weights": [
+            1,
+            1,
+            1
+          ]
+        },
+        "model": [
+          2,
+          2,
+          1
+        ],
+        "reference": [
+          2,
+          2,
+          1
+        ],
+        "note": "总数较小，余数占比较大的边界情况",
+        "agree": true,
+        "ref_error": null
+      }
+    ],
+    "tokens": [
+      957,
+      6094
+    ]
+  }
+]

@@ -30,16 +30,26 @@ class Example:
     boundary: bool = False       # 只是个标注，方便人看；不再影响判定
     # 这条判据是谁给的。用例只增不减，一年后回头看"这个期望值凭什么是它"，
     # 唯一能回答的就是出处。
-    origin: str = "caller"       # caller | reverify | manual
+    origin: str = "caller"       # caller | generated | reverify | manual
+    # 这条期望值建立在需求**没有说明**的某个决定上，比如"0.5 往上还是往下取整"。
+    # 空串 = 期望值直接来自需求原文。
+    #
+    # 加这个字段是被实测逼出来的：给一句含糊的"把一串记录去重"，模型会把
+    # "整条比较""保留第一条""保持原顺序"三个需求里根本没提的决定，当成确定的
+    # 事实写进用例。那条用例之后就是判据 —— 调用方要是另一种读法，
+    # 正确的实现会被判死。所以假设必须**记下来并且说出来**，不能藏在期望值里。
+    assumes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {"input": self.input, "output": self.output, "note": self.note,
-                "boundary": self.boundary, "origin": self.origin}
+                "boundary": self.boundary, "origin": self.origin,
+                "assumes": self.assumes}
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Example":
         return cls(input=d["input"], output=d["output"], note=d.get("note", ""),
-                   boundary=d.get("boundary", False), origin=d.get("origin", "caller"))
+                   boundary=d.get("boundary", False), origin=d.get("origin", "caller"),
+                   assumes=d.get("assumes", ""))
 
 
 @dataclass

@@ -155,7 +155,7 @@ def compile_function(
         return CompileResult(status="failed", cache=state, spec=r.spec,
                              report=r.report, lookup=lk, synth=r, proposal=prop,
                              level=r.report.level if r.report else None,
-                             reason=_blame(r), review=r.review)
+                             reason=_blame(r, prop), review=r.review)
 
     if cache == "ephemeral":
         return CompileResult(status="ready", cache=state, spec=r.spec, synth=r,
@@ -182,7 +182,7 @@ def compile_function(
                          level=r.report.level, report=r.report, review=r.review)
 
 
-def _blame(r: SynthResult) -> str:
+def _blame(r: SynthResult, prop: Proposal | None = None) -> str:
     """失败该算谁的。
 
     只挂在**自动生成**的用例上时，结论是有歧义的：可能代码错了，也可能那条用例
@@ -195,14 +195,28 @@ def _blame(r: SynthResult) -> str:
         return r.reason
     lines = ["代码通过了**你给的全部用例**，只挂在自动补的用例上 —— "
              "所以说不准是代码错了还是用例错了：", ""]
+    assumed = {_key(e.input): e.assumes for e in (prop.examples if prop else [])
+               if e.assumes}
     for f in fails[:4]:
         lines.append(f"  输入 {f['input']}")
         lines.append(f"  期望 {f['expected']}（自动生成）")
         lines.append(f"  实际 {f.get('error') or f.get('actual')}")
+        if a := assumed.get(_key(f["input"])):
+            # 这条挂掉最可能的原因：模型替需求做了个决定，而代码选了另一种读法。
+            # 这时候"谁错了"根本不成立 —— 是需求没说清。
+            lines.append(f"  ⚠ 这条压在一个需求没说的决定上：{a}")
         lines.append("")
     lines.append("请裁决：期望值对的话这就是代码的 bug；期望值错的话，"
                  "用 gen_tests=0 重编译，或者把正确的期望值补进 examples。")
+    if any(assumed.get(_key(f["input"])) for f in fails):
+        lines.append("上面带 ⚠ 的，多半不是谁错了，是**需求没说清** —— "
+                     "把那个决定写进需求，再编译一次。")
     return "\n".join(lines)
+
+
+def _key(value: Any) -> str:
+    import json as _json
+    return _json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _bank_the_hit(reg: Registry, lk: Lookup, examples: list[Example],

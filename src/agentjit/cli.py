@@ -197,6 +197,8 @@ def cmd_inspect(args) -> int:
     for e in fn.tests.examples:
         print(f"  [{e.origin}] {_json.dumps(e.input, ensure_ascii=False)[:64]}"
               f" → {_json.dumps(e.output, ensure_ascii=False)[:44]}")
+        if e.assumes:
+            print(f"      ⚠ 压在一个需求没说的决定上：{e.assumes}")
 
     print("\n-- 版本 --")
     best = fn.best()

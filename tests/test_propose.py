@@ -39,6 +39,37 @@ def fence(items):
     return "我补几条。\n\n```json\n" + json.dumps(items, ensure_ascii=False) + "\n```\n"
 
 
+# --- 假设：需求没说清的地方，模型替它做的决定 --------------------------------
+def test_assumes_is_parsed_and_marked():
+    """实测逼出来的字段。给一句含糊的"把一串记录去重"，模型会把"整条比较"
+    "保留第一条""保持原顺序"三个需求根本没提的决定当成事实写进用例 ——
+    那条用例之后就是判据，会把另一种读法的正确实现判死。"""
+    p = propose(fence([
+        {"input": {"records": [{"name": "a", "score": 1}]},
+         "output": [{"name": "a", "rank": 1}], "note": "单元素"},
+        {"input": {"records": [{"name": "b", "score": 2.5}]},
+         "output": [{"name": "b", "rank": 3}], "note": "0.5 边界",
+         "assumes": "0.5 向远离零的方向取整"},
+    ]))
+    assert [bool(e.assumes) for e in p.examples] == [False, True]
+    assert p.assumed[0].assumes == "0.5 向远离零的方向取整"
+
+
+def test_assumes_survives_a_round_trip_to_disk(tmp_path):
+    """假设要跟着用例一起存。一年后回头看"这个期望值凭什么是它"，
+    答案就在这个字段里。"""
+    from agentjit import Level, Report, Registry, Spec
+    from agentjit.types import GateResult
+
+    reg = Registry(tmp_path / "r")
+    report = Report(level=Level.VERIFIED, gates=[GateResult("static", True, "通过")])
+    ex = Example({"x": 1}, 2, origin="generated", assumes="空字符串不算空值")
+    reg.put("需求", Spec("需求", {"type": "object"}, {}),
+            "def solve(params, ctx):\n    return 2\n", report, [ex], name="f")
+
+    assert reg.get("f").tests.examples[0].assumes == "空字符串不算空值"
+
+
 @pytest.fixture(scope="module")
 def sb():
     return Sandbox()
@@ -133,6 +164,23 @@ def test_failing_only_on_generated_cases_is_handed_back_for_adjudication(tmp_pat
     assert not r.ok
     assert "通过了**你给的全部用例**" in r.reason
     assert "请裁决" in r.reason and "gen_tests=0" in r.reason
+
+
+def test_a_failure_on_an_assumed_case_says_the_requirement_is_the_problem(tmp_path, sb):
+    """挂在一条"压着需求没说的决定"的用例上时，"谁错了"根本不成立 ——
+    是需求没说清。报告要这么说，而不是让人去纠结代码和用例谁对。"""
+    wrong = fence([{"input": {"records": [{"name": "p", "score": 3},
+                                          {"name": "q", "score": 3}]},
+                    "output": [{"name": "p", "rank": 1}, {"name": "q", "rank": 2}],
+                    "note": "并列", "assumes": "同分按出现顺序给不同名次，不并列"}])
+    client = ScriptedClient([wrong] + [GOOD_CODE] * 3)
+
+    r = compile_function(REQ, SEEDS, client=client, registry=Registry(tmp_path / "r"),
+                         sandbox=sb, gen_tests=1)
+
+    assert not r.ok
+    assert "同分按出现顺序给不同名次" in r.reason
+    assert "需求没说清" in r.reason
 
 
 def test_failing_on_a_caller_case_is_still_plainly_the_code_s_fault(tmp_path, sb):

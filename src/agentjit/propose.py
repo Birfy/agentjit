@@ -36,11 +36,13 @@ SYSTEM = """你在给一段需求写测试用例。**只写用例，不写实现
 
 一个 ```json 代码块，里面是一个数组，每个元素形如：
 
-    {"input": {...}, "output": <期望的返回值>, "note": "这条在验什么"}
+    {"input": {...}, "output": <期望的返回值>, "note": "这条在验什么",
+     "assumes": "需求没说清而你自己定了的那个决定，没有就留空串"}
 
 - `input` 必须是 dict，形状要和给你的种子例子一致。
 - `output` 是**你算出来的期望结果**，必须是确定的、可 JSON 序列化的值。
 - `note` 一句话说明这条用例卡的是哪个点。
+- `assumes` 见下面那条硬规矩，这是最容易漏的一个字段。
 
 # 写什么样的用例
 
@@ -52,11 +54,17 @@ SYSTEM = """你在给一段需求写测试用例。**只写用例，不写实现
 - 顺序：输出要不要排序，按什么排，打平了怎么办
 - 异常格式：数值带符号/千分位/单位，字符串带空白
 
-# 两条硬规矩
+# 三条硬规矩
 
 1. **算错了比不写更糟。** 一条期望值写错的用例会把正确的实现判死，而且极难排查。
    任何你拿不准的点，**宁可不写这条**。
-2. **不要和种子例子矛盾。** 种子是调用方给的，它们是对的。你的用例要和它们
+2. **需求没说清的地方，必须填 `assumes`。** 这条最容易漏。举例：需求只说
+   "把一串记录去重"，那"整条比较还是按某个字段""重复时留第一条还是最后一条"
+   "要不要保持原顺序"——**这些需求都没说**。你可以挑一种写用例，但必须在
+   `assumes` 里写明你挑了哪种，比如 `"按整条记录比较，保留第一次出现"`。
+   不写的话，你的选择就会变成一条没人知道是假设的判据，把另一种读法的正确实现
+   判死。同理："四舍五入"没说 0.5 往哪边、"去掉空值"没说空字符串算不算空。
+3. **不要和种子例子矛盾。** 种子是调用方给的，它们是对的。你的用例要和它们
    自洽 —— 如果你觉得某个种子例子有问题，在 note 里说，但别改它。
 
 # 关于下面的输入
@@ -73,6 +81,12 @@ class Proposal:
     output_tokens: int = 0
     error: str = ""
 
+    @property
+    def assumed(self) -> list[Example]:
+        """期望值压在需求没说清的决定上的那几条。调用方最该看的就是这几条 ——
+        它们是"模型替你做的决定"，不是"需求本来的意思"。"""
+        return [e for e in self.examples if e.assumes]
+
     def render(self) -> str:
         lines = [f"  自动补了 {len(self.examples)} 条用例"
                  + (f"，丢掉 {len(self.dropped)} 条" if self.dropped else "")]
@@ -80,6 +94,8 @@ class Proposal:
             lines.append(f"    {json.dumps(e.input, ensure_ascii=False)[:52]}"
                          f" → {json.dumps(e.output, ensure_ascii=False)[:32]}"
                          + (f"　（{e.note}）" if e.note else ""))
+            if e.assumes:
+                lines.append(f"      ⚠ 假设了需求没说的事：{e.assumes}")
         for d in self.dropped:
             lines.append(f"    丢弃: {d['why']}")
         if self.error:
@@ -145,6 +161,7 @@ def propose_tests(
         seen[_key(item["input"])] = item["output"]
         p.examples.append(Example(input=item["input"], output=item["output"],
                                   note=str(item.get("note", ""))[:120],
+                                  assumes=str(item.get("assumes", ""))[:200],
                                   origin="generated"))
     return p
 
