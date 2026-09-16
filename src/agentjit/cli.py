@@ -236,6 +236,10 @@ def cmd_inspect(args) -> int:
               f"调用 {s.calls}（ok {s.ok} / guard {s.guard_failed} / "
               f"错 {s.attributable} / 警告 {s.warnings}）　"
               f"合成 {v.synth_input_tokens}in/{v.synth_output_tokens}out　{v.model}")
+        # 复验通过次数是 best() 排序的第二项：被越多调用方用自己的例子验过越可信。
+        # 不打出来的话，为什么选了这个版本就成了黑箱。
+        print(f"      复验通过 {s.reverify_passes} 次"
+              + (f"　线上失败率 {s.failure_rate:.1%}" if s.attributable else ""))
         if v.properties:
             print(f"      后置断言（只警告）: {', '.join(v.properties)}")
         if v.quarantine_reason:
